@@ -157,7 +157,13 @@ either a **built-in** one or a **custom** one from a loaded bank.
   Intro/Verse/Outro transitions keep working for built-in tracks. A postfix (not
   a false-returning prefix) is used deliberately — `Start` also does racer,
   camera, and HUD setup, so suppressing it would break the level.
-- Postfix on `MenuManager.Start()` applies the menu override the same way.
+- **Menu override** is a prefix on `AkSoundEngine.PostEvent(string, GameObject)`
+  that rewrites the vanilla menu event `"Play_00_Menu"` to your `menuEvent` at the
+  source. That single event name is posted from both `MenuManager.Start` (cold boot)
+  and the `MenuManager.UnloadLevel` coroutine (returning to the menu from a level),
+  so one hook covers **every** menu-music entry point — no more return-to-menu gap —
+  and the vanilla track never plays even for a frame. The prefix early-outs on a bool
+  check when the override is off, so non-menu sound effects are unaffected.
 
 ### Fixed from the original
 
@@ -189,8 +195,9 @@ audio playback is boot-pending** — the game could not be run in this environme
   built-in event (expected, since the state group is global — but unverified).
 - Custom `.bnk` loading and custom-event playback (entirely dependent on a
   correctly authored bank; the plugin only calls `LoadBank` + `PostEvent`).
-- Menu override timing, and the known gap that returning to the menu *from a
-  level* re-posts the vanilla menu track (via `MenuManager.UnloadLevel`, not
-  covered by the `Start` postfix).
+- Menu override timing across all entry points (cold-boot menu AND
+  return-to-menu-from-a-level, both now covered by the `PostEvent` rewrite —
+  verified statically that `"Play_00_Menu"` is the only menu-BGM event and is
+  posted from exactly those two sites, but the swap itself is boot-pending).
 - Whether a custom event responds to the game's music-state group at all (a
   Wwise-authoring property of the event, not controllable from C#).

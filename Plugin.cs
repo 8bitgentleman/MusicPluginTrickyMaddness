@@ -244,26 +244,34 @@ namespace MusicPluginTrickyMaddness
             Plugin.Log.LogInfo($"[Level] '{Plugin.CurrentLevelName}' -> posted '{ev}'");
         }
 
-        // Menu music override. Vanilla MenuManager.Start posts "Play_00_Menu" on
-        // musicPlayer. When enabled and a menuEvent is configured, stop it and
-        // post the override on the same GO. (Note: returning to the menu from a
-        // level re-posts the vanilla menu track from MenuManager.UnloadLevel,
-        // which this postfix does not cover — documented limitation.)
-        [HarmonyPatch(typeof(MenuManager), "Start")]
-        [HarmonyPostfix]
-        private static void MenuManagerStart_Postfix(MenuManager __instance)
+        // Menu music override. The vanilla menu track "Play_00_Menu" is posted from
+        // TWO sites — MenuManager.Start (cold boot) AND the MenuManager.UnloadLevel
+        // coroutine (returning to the menu from a level). Rather than patch each site
+        // (the UnloadLevel one lives inside a compiler-generated state machine), we
+        // rewrite the event name at its single choke point: PostEvent(string,
+        // GameObject). "Play_00_Menu" is posted ONLY as menu BGM (verified: exactly
+        // those two call sites in Assembly-CSharp), so swapping it here is safe and
+        // covers every entry point — including return-to-menu — with one hook. This
+        // substitutes at the source, so no StopAll/re-post is needed and the vanilla
+        // track never plays even for a frame.
+        private const string VanillaMenuEvent = "Play_00_Menu";
+
+        [HarmonyPatch(typeof(AkSoundEngine), "PostEvent",
+            new Type[] { typeof(string), typeof(UnityEngine.GameObject) })]
+        [HarmonyPrefix]
+        private static void PostEvent_Prefix(ref string in_pszEventName)
         {
-            if (Plugin.masterEnable == null || !Plugin.masterEnable.Value) return;
+            // Cheapest checks first — this runs on every 2-arg PostEvent in the game.
             if (Plugin.overrideMenuMusic == null || !Plugin.overrideMenuMusic.Value) return;
+            if (Plugin.masterEnable == null || !Plugin.masterEnable.Value) return;
+            if (in_pszEventName != VanillaMenuEvent) return;
 
             string ev = Plugin.ConfigData != null ? Plugin.ConfigData.menuEvent : null;
             if (string.IsNullOrEmpty(ev)) return;
-            if (__instance == null || __instance.musicPlayer == null) return;
 
             Plugin.EnsureBanksLoaded();
-            AkSoundEngine.StopAll(__instance.musicPlayer);
-            AkSoundEngine.PostEvent(ev, __instance.musicPlayer);
-            Plugin.Log.LogInfo($"[Menu] menu music overridden -> '{ev}'");
+            in_pszEventName = ev;
+            Plugin.Verbose($"[Menu] menu music overridden -> '{ev}'");
         }
     }
 }
