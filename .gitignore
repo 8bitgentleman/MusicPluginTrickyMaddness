@@ -396,3 +396,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Built plugin (produced by build.sh)
+/MusicPluginTrickyMaddness.dll
