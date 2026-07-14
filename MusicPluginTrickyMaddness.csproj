@@ -9,10 +9,15 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <!--
+    NOTE: The maintained build is build.sh (mcs) against the real game DLLs — see
+    the README. This csproj is kept for upstream/Windows IDE use. PluginInfo is now
+    hand-written (PluginInfo.cs), so the BepInEx.PluginInfoProps code-gen package
+    was removed to avoid a duplicate PluginInfo type.
+  -->
   <ItemGroup>
     <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
     <PackageReference Include="BepInEx.Core" Version="5.*" />
-    <PackageReference Include="BepInEx.PluginInfoProps" Version="1.*" />
     <PackageReference Include="UnityEngine.Modules" Version="2022.3.20" IncludeAssets="compile" />
   </ItemGroup>
   
@@ -23,6 +28,12 @@
   <ItemGroup>
     <Reference Include="AK.Wwise.Unity.API">
       <HintPath>D:\Tricky Maddness\TrickyMadnes_Next_Fest_Windows Mod\Windows\Tricky Madness_Data\Managed\AK.Wwise.Unity.API.dll</HintPath>
+    </Reference>
+    <Reference Include="AK.Wwise.Unity.API.WwiseTypes">
+      <HintPath>D:\Tricky Maddness\TrickyMadnes_Next_Fest_Windows Mod\Windows\Tricky Madness_Data\Managed\AK.Wwise.Unity.API.WwiseTypes.dll</HintPath>
+    </Reference>
+    <Reference Include="AK.Wwise.Unity.MonoBehaviour">
+      <HintPath>D:\Tricky Maddness\TrickyMadnes_Next_Fest_Windows Mod\Windows\Tricky Madness_Data\Managed\AK.Wwise.Unity.MonoBehaviour.dll</HintPath>
     </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>D:\Tricky Maddness\TrickyMadnes_Next_Fest_Windows Mod\Windows\Tricky Madness_Data\Managed\Assembly-CSharp.dll</HintPath>
