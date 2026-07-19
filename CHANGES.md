@@ -4,6 +4,11 @@ Fork of [GlitcherOG/MusicPluginTrickyMaddness](https://github.com/GlitcherOG/Mus
 Doubles as the PR description when we push upstream. Fork point:
 `a0b3f17` (upstream/main).
 
+> **This doc covers Direction 1 only** — the in-engine per-level Wwise rewrite. The
+> fork also carries **Radio Big** (`radio/`), an external-player DJ station that is a
+> larger architectural departure. See **`RADIO_BIG.md`** for the split and why. The
+> two don't run together (both claim the music slot).
+
 ## TL;DR
 
 The upstream plugin was written against an **old game beta and no longer runs** —

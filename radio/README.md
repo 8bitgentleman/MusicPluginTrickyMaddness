@@ -17,8 +17,8 @@ just mutes the game's own music and forwards events to it over a localhost socke
    Tricky Madness ──(RadioBigTM plugin)──> localhost:48757 ──> radio_server.py
      mutes 8 music events (SFX untouched)        │                  │
      START <level> on course start               │            DJBrain (dj_brain.py)
-     END on return-to-menu                        │            RadioPlayer (pygame)
-     EVENT combo/knockdown/finish (later)         │            + dj_library.py
+     FINISH on race end, MENU on return           │            RadioPlayer (pygame)
+     EVENT combo/knockdown (later)                │            + dj_library.py
 ```
 
 ## Pieces
@@ -28,7 +28,7 @@ just mutes the game's own music and forwards events to it over a localhost socke
 | `radio_player.py` | Audio core: music bed + DJ voice channel, real ducking. |
 | `dj_library.py`   | Indexes the DJ clips + soundtracks; matches songs to artist intros. |
 | `dj_brain.py`     | The scheduler — station ID, banter, intro, song, reactions. |
-| `radio_server.py` | localhost socket the plugin talks to (verbs: HELLO/START/END/EVENT). |
+| `radio_server.py` | localhost socket the plugin talks to (verbs: HELLO/PING/START/FINISH/MENU/EVENT/QUIT). |
 | `run_radio.sh`    | Convenience launcher for the server. |
 | `RadioBigPlugin/` | The BepInEx bridge plugin (`RadioBig.cs`, `build.sh`). |
 
