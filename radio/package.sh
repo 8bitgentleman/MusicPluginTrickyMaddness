@@ -22,9 +22,14 @@ OUT="${1:-$HERE/_release/RadioBig - Tricky Madness Mod}"
 DLL="$HERE/RadioBigPlugin/RadioBigTM.dll"
 MAC_SRC="$HERE/dist/RadioBigPlayer"
 WIN_SRC="$HERE/dist-windows/RadioBigPlayer"
-DJ_SRC="/Users/mtvogel/Downloads/claude_scratch/Radio_Big/Radio_Big_Sections"
-SSX3_SRC="/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX 3 [Soundtrack⧸Gamerip]"
-TRICKY_SRC="/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX Tricky (Complete Soundtrack OST)"
+
+# Audio source. The canonical store is the live game install's bundled assets —
+# a full standalone copy — so the original dev-path rips can be deleted without
+# breaking a re-package. Override with RADIO_BIG_ASSETS_SRC if it lives elsewhere.
+ASSETS_SRC="${RADIO_BIG_ASSETS_SRC:-$HOME/Library/Application Support/Steam/steamapps/common/Tricky Madness/BepInEx/plugins/RadioBig/assets}"
+DJ_SRC="$ASSETS_SRC/dj"
+SSX3_SRC="$ASSETS_SRC/ssx3"
+TRICKY_SRC="$ASSETS_SRC/tricky"
 
 # Required prerequisites (the DLL + the audio); players are per-OS and optional.
 for p in "$DLL" "$DJ_SRC" "$SSX3_SRC" "$TRICKY_SRC"; do
