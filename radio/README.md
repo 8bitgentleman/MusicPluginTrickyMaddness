@@ -1,0 +1,70 @@
+# Radio Big — a live SSX3-style DJ for Tricky Madness
+
+Atomika-style radio takeover: the game's music slot is replaced by a dynamic
+station that plays **DJ banter → an artist intro → a song → more banter → a song**,
+paced by how long you're on the course, and **never the same twice**. When the
+next track is an SSX3 song with a dedicated Atomika intro, the DJ actually names
+the artist about to play.
+
+## Why it's built this way (the short version)
+
+Tricky Madness has **Unity audio disabled** and is **Wwise-only**, so custom mp3s
+can't play *inside* the game (full RE: `../../tricky_mods/ssx/MUSIC_MOD_RE.md`).
+So the audio lives in an **external Python player**, and a tiny BepInEx plugin
+just mutes the game's own music and forwards events to it over a localhost socket:
+
+```
+   Tricky Madness ──(RadioBigTM plugin)──> localhost:48757 ──> radio_server.py
+     mutes 8 music events (SFX untouched)        │                  │
+     START <level> on course start               │            DJBrain (dj_brain.py)
+     END on return-to-menu                        │            RadioPlayer (pygame)
+     EVENT combo/knockdown/finish (later)         │            + dj_library.py
+```
+
+## Pieces
+
+| File | Role |
+|------|------|
+| `radio_player.py` | Audio core: music bed + DJ voice channel, real ducking. |
+| `dj_library.py`   | Indexes the DJ clips + soundtracks; matches songs to artist intros. |
+| `dj_brain.py`     | The scheduler — station ID, banter, intro, song, reactions. |
+| `radio_server.py` | localhost socket the plugin talks to (verbs: HELLO/START/END/EVENT). |
+| `run_radio.sh`    | Convenience launcher for the server. |
+| `RadioBigPlugin/` | The BepInEx bridge plugin (`RadioBig.cs`, `build.sh`). |
+
+Asset locations are constants at the top of `dj_library.py` / `radio_player.py`
+(the SSX3 + Tricky soundtrack rips and the `Radio_Big_Sections` DJ clips).
+
+## Run it
+
+1. **Player** (needs `python3` + `pip3 install pygame`):
+   ```sh
+   ./run_radio.sh
+   ```
+   Leave it running. It reconnects, so you can (re)start it any time.
+2. **Plugin**: build and install once:
+   ```sh
+   RadioBigPlugin/build.sh --mac
+   cp RadioBigPlugin/RadioBigTM.dll "<game>/BepInEx/plugins/"
+   ```
+3. Launch Tricky Madness, drop into a course — the radio takes over.
+
+Config: `BepInEx/config/com.mtv.radiobig.cfg` (`Enabled`, `SuppressGameMusic`,
+`Host`, `Port`). Don't run this alongside the per-level `MusicPluginTrickyMaddness`
+— both fight over the music slot.
+
+## Dogfood without the game
+
+```sh
+python3 dj_brain.py       # a compressed broadcast you can hear, no game running
+python3 dj_library.py     # print the song<->intro match table
+```
+
+## Status
+
+- Route C (external player) + live ducking: **proven by ear.**
+- DJ brain, artist matching, IPC protocol: **built + tested** (silent-stub dry runs).
+- Plugin: **compiles + statically verified** (Harmony targets bound, 8 music
+  events + protocol verbs in the IL). **Boot-test pending.**
+- Reactive `EVENT` lines: player + protocol ready; the game-side combo/knockdown/
+  finish hooks are **not wired yet** (needs Assembly-CSharp RE) — START/END only.
