@@ -6,16 +6,18 @@ finish). ALL the pacing and song/clip selection lives here so it can be retuned 
 editing Python, no DLL rebuild. A "broadcast" runs on its own thread the moment a
 course starts:
 
-    station ID  ->  [warm-up banter]  ->  artist-matched intro  ->  SONG
-                 ->  (song rides under gameplay) ->  [banter] -> intro -> SONG ...
-    course end  ->  outro  ->  fade
+    RACE:  artist-matched intro  ->  SONG  ->  (rides under gameplay)
+                                 ->  intro -> SONG ...   course end -> outro -> fade
+    MENU:  lobby loop  +  banter spliced in every ~16s
 
 "Smarter than random": when the next song is an SSX3 track with a dedicated
 Atomika intro, the DJ actually names the artist about to play (dj_library). Every
 category is drawn from a no-repeat shuffle bag, so two loads never sound the same.
+The menu banter is also session-aware — post-race recap clips only enter the pool
+once you've actually raced, so a cold boot never recaps a race that never happened.
 
-Reactive lines (combo/knockdown/finish) duck in over the bed, best-effort — a live
-reaction is dropped rather than queued if the DJ is already mid-sentence.
+There are no in-the-moment reactive barks: the voice pack is all 12-20s broadcast
+segments, nothing short enough to punch in on a single trick (see react()).
 """
 import os
 import sys
@@ -49,9 +51,12 @@ class ShuffleBag:
 
 class DJBrain:
     # Chatter for the MENU broadcast — the lobby is where the banter lives now
-    # (in-race it was too much dead air, so race mode is intro/outro only).
+    # (in-race it was too much dead air, so race mode is intro/outro only). These
+    # are all timeless or forward-looking ("competitors WILL be racing...") so
+    # they're safe on a cold boot; nothing here references a race as past tense.
     MENU_BANTER_CATS = [
         ("BigMountainLocalNews", 5),
+        ("EventIntroductions", 4),      # forward promos, launch-safe
         ("RiderBackstories", 4),
         ("RiderCircuitProgressio", 3),
         ("CurrentWeatherConditio", 2),
@@ -60,12 +65,17 @@ class DJBrain:
         ("PeakRivalQuotes", 1),
         ("FreeRideQuotes", 1),
         ("BackcountryQuotes", 1),
+        ("EnteringAStation", 1),
         ("TextMessageReminders", 1),
     ]
-    REACT_CATS = {
-        "combo": ["FreestyleHigh-Score", "AggressionDuringEvents"],
-        "knockdown": ["AggressionDuringEvents", "PeakRivalQuotes"],
-    }
+    # Past-tense event RECAPS ("did anyone catch what went down today?"). They only
+    # make sense once a race has happened, so they fold into the menu pool AFTER the
+    # first course starts this session — never on a cold boot, where they'd recap a
+    # race that never occurred.
+    POSTRACE_BANTER_CATS = [
+        ("FreestyleHigh-Score", 4),
+        ("AggressionDuringEvents", 2),
+    ]
 
     def __init__(self, player=None, library=None, seed=None,
                  segment_seconds=95, ssx3_bias=0.78, menu_banter_gap=16):
@@ -92,10 +102,12 @@ class DJBrain:
         self._voice_lock = threading.Lock()  # one DJ voice clip at a time
         self._stop = threading.Event()
         self._thread = None
+        self._raced_session = False  # unlocks recap banter after the first race
 
     # --- public API (driven by the plugin over IPC) ----------------------
     def start_course(self, name=""):
         """A race started: intro -> song (no menu chatter)."""
+        self._raced_session = True  # from now on the lobby may recap races
         self._begin(self._race_broadcast)
 
     def enter_menu(self):
@@ -114,16 +126,14 @@ class DJBrain:
         self.player.stop(fade_ms=fade_ms)
 
     def react(self, kind):
-        """One-off ducked line for a gameplay beat. Dropped if the DJ is busy."""
-        cats = self.REACT_CATS.get(kind)
-        if not cats:
-            return
-        cat = self.rng.choice(cats)
-        bag = self._bags.get(cat)
-        clip = bag.draw() if bag else None
-        if clip:
-            threading.Thread(target=self._say, args=(clip,),
-                             kwargs=dict(blocking=False), daemon=True).start()
+        """Reactive one-liner for a gameplay beat (combo/knockdown/...).
+
+        Deliberately a no-op. The Radio Big voice pack has NO short in-the-moment
+        barks — every content clip is a 12-20s broadcast segment (verified against
+        the clip manifest), so reacting to a single trick would drop a monologue
+        mid-run. The game-side event hooks and this EVENT verb stay wired so a
+        future pack with real barks is a one-line enable; today it does nothing."""
+        return
 
     # --- worker lifecycle ------------------------------------------------
     def _begin(self, target):
@@ -211,7 +221,10 @@ class DJBrain:
         return self._generic_intro_bag.draw()
 
     def _draw_menu_banter(self):
-        cats, weights = zip(*self.MENU_BANTER_CATS)
+        pool = self.MENU_BANTER_CATS
+        if self._raced_session:  # recaps earn their way in after the first race
+            pool = pool + self.POSTRACE_BANTER_CATS
+        cats, weights = zip(*pool)
         cat = self.rng.choices(cats, weights=weights, k=1)[0]
         return self._draw(cat)
 
