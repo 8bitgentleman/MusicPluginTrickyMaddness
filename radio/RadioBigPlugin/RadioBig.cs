@@ -118,11 +118,34 @@ namespace RadioBigTM
                     Arguments = $"--managed --host {serverHost.Value} --port {serverPort.Value}",
                     UseShellExecute = false,
                     WorkingDirectory = playerDir,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                 };
                 if (Directory.Exists(assets))
                     psi.EnvironmentVariables["RADIO_BIG_ASSETS"] = assets;
+
+                // CRITICAL: the game boots via BepInEx/Doorstop, which exports
+                // DYLD_INSERT_LIBRARIES=libdoorstop.dylib (a BARE relative name —
+                // run_bepinex.sh cd's into the doorstop dir first). A child spawned
+                // here inherits that var but runs from playerDir, so dyld can't find
+                // the dylib and HARD-KILLS the player at load, before Python starts.
+                // The player is plain Python — it must never have doorstop injected.
+                // Strip the injection vars (mac + linux) from the child's env.
+                foreach (string v in new[] { "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
+                                             "LD_PRELOAD", "LD_LIBRARY_PATH" })
+                    psi.EnvironmentVariables.Remove(v);
+
+                // The player is otherwise a black box when game-spawned (its stdout
+                // goes nowhere), so tee both streams to a log next to the DLL. This
+                // is how we see pygame/asset failures that only bite under launch.
                 PlayerProc = Process.Start(psi);
-                Log.LogInfo($"[Radio] launched bundled player (pid {PlayerProc.Id}).");
+                string plog = Path.Combine(dir, "RadioBig", "player.log");
+                var writer = new StreamWriter(plog, false) { AutoFlush = true };
+                PlayerProc.OutputDataReceived += (s, e) => { if (e.Data != null) writer.WriteLine(e.Data); };
+                PlayerProc.ErrorDataReceived  += (s, e) => { if (e.Data != null) writer.WriteLine(e.Data); };
+                PlayerProc.BeginOutputReadLine();
+                PlayerProc.BeginErrorReadLine();
+                Log.LogInfo($"[Radio] launched bundled player (pid {PlayerProc.Id}); log -> {plog}");
             }
             catch (Exception e)
             {
