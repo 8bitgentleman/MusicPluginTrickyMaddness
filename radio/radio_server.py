@@ -24,7 +24,10 @@ import threading
 
 from dj_brain import DJBrain
 
-VERSION = "0.1.0"
+# Keep in sync with the plugin's BepInPlugin version in RadioBigPlugin/RadioBig.cs.
+# Only surfaced in the HELLO reply (which the plugin doesn't currently read), so
+# this copy is cosmetic — the plugin attr is the one bug reporters actually see.
+VERSION = "1.0.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 48757  # arbitrary high port; must match the plugin config
 

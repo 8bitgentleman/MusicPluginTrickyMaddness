@@ -30,7 +30,11 @@ namespace RadioBigTM
     // Music-event suppression and the menu signal ride the same
     // AkSoundEngine.PostEvent(string, GameObject) choke point the game posts music
     // from — verified in Assembly-CSharp as the single music entry point.
-    [BepInPlugin("com.mtv.radiobig", "Radio Big", "0.1.0")]
+    // VERSION: keep this in sync with radio_server.py's VERSION const. This one is
+    // the load-bearing copy — BepInEx logs it on plugin load, so it's what a bug
+    // reporter's LogOutput.log shows. (The player's copy only appears in the HELLO
+    // reply, which this plugin never reads, so it's cosmetic — but sync it anyway.)
+    [BepInPlugin("com.mtv.radiobig", "Radio Big", "1.0.0")]
     public class Plugin : BaseUnityPlugin
     {
         internal static Plugin Instance;
