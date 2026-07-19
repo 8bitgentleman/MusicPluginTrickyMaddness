@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Assemble the shippable Radio Big drop-in: the bridge DLL + the frozen player +
-# all the audio, laid out exactly as the plugin expects under BepInEx/plugins/.
+# Assemble the shippable Radio Big drop-in — one release tree that installs on
+# Windows, macOS, and Linux. The bridge DLL and the audio are shared across all
+# platforms; only the frozen player differs, so each OS's freeze lands in its own
+# players/<os>/ subdir and the plugin picks the matching one at launch. The full
+# Python + C# source ships under source/ so any platform (incl. Linux) can run
+# from source or re-freeze.
 #
-# Prereqs (run these first):
-#   RadioBigPlugin/build.sh --mac                 # -> RadioBigTM.dll
-#   pyinstaller ... radio_server.py               # -> dist/RadioBigPlayer/  (see freeze.sh)
+# Prereqs (build whatever platforms you want to ship; missing ones are skipped
+# with a warning, not an error):
+#   RadioBigPlugin/build.sh --mac     # -> RadioBigTM.dll        (portable, required)
+#   ./freeze.sh                       # -> dist/RadioBigPlayer/          (mac-arm64)
+#   ./freeze_windows.sh               # -> dist-windows/RadioBigPlayer/  (windows)
 #
 # Usage: ./package.sh [output-dir]
 # macOS ships bash 3.2 — keep this 3.2-safe (no assoc arrays / ${x,,}).
@@ -13,37 +19,61 @@ set -eu
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$HERE/_release/RadioBig - Tricky Madness Mod}"
 
-PLAYER_SRC="$HERE/dist/RadioBigPlayer"
 DLL="$HERE/RadioBigPlugin/RadioBigTM.dll"
+MAC_SRC="$HERE/dist/RadioBigPlayer"
+WIN_SRC="$HERE/dist-windows/RadioBigPlayer"
 DJ_SRC="/Users/mtvogel/Downloads/claude_scratch/Radio_Big/Radio_Big_Sections"
 SSX3_SRC="/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX 3 [Soundtrack⧸Gamerip]"
 TRICKY_SRC="/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX Tricky (Complete Soundtrack OST)"
 
-for p in "$PLAYER_SRC/RadioBigPlayer" "$DLL" "$DJ_SRC" "$SSX3_SRC" "$TRICKY_SRC"; do
+# Required prerequisites (the DLL + the audio); players are per-OS and optional.
+for p in "$DLL" "$DJ_SRC" "$SSX3_SRC" "$TRICKY_SRC"; do
   [ -e "$p" ] || { echo "missing prerequisite: $p" >&2; exit 1; }
 done
 
 echo "staging -> $OUT"
 rm -rf "$OUT"
-mkdir -p "$OUT/RadioBig/player" \
-         "$OUT/RadioBig/assets/dj" \
+mkdir -p "$OUT/RadioBig/assets/dj" \
          "$OUT/RadioBig/assets/ssx3" \
-         "$OUT/RadioBig/assets/tricky"
+         "$OUT/RadioBig/assets/tricky" \
+         "$OUT/RadioBig/players" \
+         "$OUT/source/RadioBigPlugin"
 
+# --- shared: DLL + README ----------------------------------------------------
 cp "$DLL" "$OUT/RadioBigTM.dll"
 cp "$HERE/RELEASE_README.md" "$OUT/README.md"
-cp -R "$PLAYER_SRC/." "$OUT/RadioBig/player/"
 
-echo "  copying DJ voice clips…";  cp "$DJ_SRC"/*.mp3     "$OUT/RadioBig/assets/dj/"
-echo "  copying SSX3 soundtrack…"; cp "$SSX3_SRC"/*.mp3   "$OUT/RadioBig/assets/ssx3/"
-echo "  copying Tricky soundtrack…"; cp "$TRICKY_SRC"/*.mp3 "$OUT/RadioBig/assets/tricky/"
+# --- per-OS frozen players ---------------------------------------------------
+stage_player() {  # <src dir> <dest-subdir> <label>
+  if [ -d "$1" ]; then
+    cp -R "$1" "$OUT/RadioBig/players/$2"
+    xattr -cr "$OUT/RadioBig/players/$2" 2>/dev/null || true
+    echo "  + player ($3)"
+  else
+    echo "  ! no $3 freeze at $1 — skipping (build it or ship source only)" >&2
+  fi
+}
+stage_player "$MAC_SRC" "mac-arm64" "mac-arm64"
+stage_player "$WIN_SRC" "windows"   "windows"
 
-# Best-effort: clear quarantine so the unsigned player runs locally without a prompt.
-xattr -dr com.apple.quarantine "$OUT/RadioBig/player" 2>/dev/null || true
+# --- source tree (so Linux / any platform can run or re-freeze) --------------
+cp "$HERE/radio_server.py" "$HERE/dj_brain.py" "$HERE/dj_library.py" \
+   "$HERE/radio_player.py" "$HERE/run_radio.sh" \
+   "$HERE/freeze.sh" "$HERE/freeze_windows.sh" "$HERE/package.sh" \
+   "$OUT/source/"
+cp "$HERE/RadioBigPlugin/RadioBig.cs" "$HERE/RadioBigPlugin/build.sh" \
+   "$OUT/source/RadioBigPlugin/"
+cp "$HERE/BUILD.md" "$OUT/source/BUILD.md"
+
+# --- audio (the big part) ----------------------------------------------------
+echo "  copying DJ voice clips…";   cp "$DJ_SRC"/*.mp3     "$OUT/RadioBig/assets/dj/"
+echo "  copying SSX3 soundtrack…";  cp "$SSX3_SRC"/*.mp3   "$OUT/RadioBig/assets/ssx3/"
+echo "  copying Tricky soundtrack…";cp "$TRICKY_SRC"/*.mp3 "$OUT/RadioBig/assets/tricky/"
 
 echo "done."
-printf 'dj=%s  ssx3=%s  tricky=%s clips\n' \
-  "$(ls "$OUT/RadioBig/assets/dj"/*.mp3 | wc -l | tr -d ' ')" \
-  "$(ls "$OUT/RadioBig/assets/ssx3"/*.mp3 | wc -l | tr -d ' ')" \
+printf 'players: %s   dj=%s ssx3=%s tricky=%s clips\n' \
+  "$(ls "$OUT/RadioBig/players" 2>/dev/null | tr '\n' ',' | sed 's/,$//')" \
+  "$(ls "$OUT/RadioBig/assets/dj"/*.mp3     | wc -l | tr -d ' ')" \
+  "$(ls "$OUT/RadioBig/assets/ssx3"/*.mp3   | wc -l | tr -d ' ')" \
   "$(ls "$OUT/RadioBig/assets/tricky"/*.mp3 | wc -l | tr -d ' ')"
 du -sh "$OUT"

@@ -92,10 +92,23 @@ namespace RadioBigTM
                            $"{serverHost.Value}:{serverPort.Value}.");
         }
 
-        // Spawn the frozen player that ships next to this DLL:
+        // Detect the platform family so we pick the matching frozen player. Mono's
+        // OSVersion.Platform reports Unix for BOTH mac and linux, so we split those
+        // by a filesystem tell (mac has /System/Library). "windows" | "mac" | "linux".
+        private static string PlatformKey()
+        {
+            if (Path.DirectorySeparatorChar == '\\' ||
+                Environment.OSVersion.Platform == PlatformID.Win32NT)
+                return "windows";
+            return Directory.Exists("/System/Library") ? "mac" : "linux";
+        }
+
+        // Spawn the frozen player that ships next to this DLL. One release tree
+        // carries every OS's freeze; we launch the one matching the host:
         //   plugins/RadioBigTM.dll
-        //   plugins/RadioBig/player/RadioBigPlayer   (+ _internal)
+        //   plugins/RadioBig/players/<windows|mac-arm64|linux>/RadioBigPlayer[.exe]  (+ _internal)
         //   plugins/RadioBig/assets/{dj,ssx3,tricky}
+        // (The legacy flat plugins/RadioBig/player/ is still honored as a fallback.)
         // In managed mode the player self-exits when our socket drops (game quit
         // or crash), so no orphan survives; OnDestroy kills it as a backstop.
         private static void LaunchPlayer()
@@ -103,21 +116,36 @@ namespace RadioBigTM
             try
             {
                 string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string playerDir = Path.Combine(dir, "RadioBig", "player");
-                string assets = Path.Combine(dir, "RadioBig", "assets");
-                // PyInstaller names the frozen binary "RadioBigPlayer" on mac/linux
-                // and "RadioBigPlayer.exe" on Windows. Probe both so one bundle
-                // layout works on every platform's freeze (whichever ships).
-                string exe = null;
-                foreach (string name in new[] { "RadioBigPlayer.exe", "RadioBigPlayer" })
+                string root = Path.Combine(dir, "RadioBig");
+                string assets = Path.Combine(root, "assets");
+
+                // Candidate player dirs, most-specific first, ending in the legacy
+                // flat layout. Only dirs that match the host OS are worth probing —
+                // a mac can't run RadioBigPlayer.exe even though the file is present.
+                string plat = PlatformKey();
+                var dirs = new List<string>();
+                if (plat == "windows") dirs.Add(Path.Combine(root, "players", "windows"));
+                else if (plat == "mac") { dirs.Add(Path.Combine(root, "players", "mac-arm64"));
+                                          dirs.Add(Path.Combine(root, "players", "mac")); }
+                else dirs.Add(Path.Combine(root, "players", "linux"));
+                dirs.Add(Path.Combine(root, "player"));   // legacy flat fallback
+
+                // PyInstaller names the binary "RadioBigPlayer.exe" on Windows,
+                // "RadioBigPlayer" on mac/linux — probe both within each dir.
+                string exe = null, playerDir = null;
+                foreach (string d in dirs)
                 {
-                    string cand = Path.Combine(playerDir, name);
-                    if (File.Exists(cand)) { exe = cand; break; }
+                    foreach (string name in new[] { "RadioBigPlayer.exe", "RadioBigPlayer" })
+                    {
+                        string cand = Path.Combine(d, name);
+                        if (File.Exists(cand)) { exe = cand; playerDir = d; break; }
+                    }
+                    if (exe != null) break;
                 }
                 if (exe == null)
                 {
-                    Log.LogInfo($"[Radio] auto-launch skipped: no bundled player in {playerDir} " +
-                                "(start it manually, or this is a source/dev build).");
+                    Log.LogInfo($"[Radio] auto-launch skipped: no bundled {plat} player under " +
+                                $"{Path.Combine(root, "players")} (run it from source, or this is a dev build).");
                     return;
                 }
                 var psi = new ProcessStartInfo

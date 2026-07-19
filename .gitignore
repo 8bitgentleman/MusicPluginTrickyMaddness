@@ -410,3 +410,6 @@ radio/dist/
 radio/build/
 radio/_release/
 radio/*.spec
+
+# Windows freeze staging (regenerate via radio/freeze_windows.sh)
+radio/dist-windows/
