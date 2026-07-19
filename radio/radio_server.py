@@ -7,14 +7,15 @@ one command (newline-terminated, case-insensitive verb):
 
     HELLO                 ->  OK Radio Big <version>
     PING                  ->  PONG
-    START <level name>    ->  begin a broadcast for that course
-    END                   ->  sign off + fade the current broadcast
-    EVENT <combo|knockdown|finish>  ->  ducked reactive DJ line
-    QUIT                  ->  close this connection (broadcast keeps running)
+    START <level name>    ->  race broadcast (intro -> song)
+    FINISH                ->  race finished: outro NOW, then fade
+    MENU                  ->  lobby broadcast (menu loops + banter)
+    EVENT <combo|knockdown>  ->  ducked reactive DJ line
+    QUIT                  ->  close this connection
 
 Deliberately single-purpose and forgiving: unknown verbs get `ERR ...` but never
-crash the server, and the DJBrain outlives any one connection so the game can
-disconnect/reconnect (level reload, alt-tab) without killing the music.
+crash the server. A dropped connection (the game quit) stops the music — that's
+the one place the socket lifetime maps to the broadcast lifetime.
 """
 import argparse
 import socket
@@ -68,7 +69,9 @@ class RadioServer:
                     conn.sendall((reply + "\n").encode("utf-8"))
                 except OSError:
                     break
-        print("[server] client disconnected", flush=True)
+        # Connection gone (the game quit / crashed) -> silence the radio too.
+        print("[server] client disconnected -> stopping broadcast", flush=True)
+        self.dj.stop_all(fade_ms=400)
 
     def _dispatch(self, line):
         parts = line.split(None, 1)
@@ -82,9 +85,12 @@ class RadioServer:
             if verb == "START":
                 self.dj.start_course(arg)
                 return f"OK started {arg}"
-            if verb == "END":
-                self.dj.stop_course()
-                return "OK ended"
+            if verb == "FINISH":
+                self.dj.finish()
+                return "OK finish"
+            if verb == "MENU":
+                self.dj.enter_menu()
+                return "OK menu"
             if verb == "EVENT":
                 self.dj.react(arg.lower())
                 return f"OK event {arg}"

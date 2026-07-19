@@ -23,16 +23,22 @@ import pygame
 
 
 class RadioPlayer:
-    def __init__(self, music_full=1.0, music_ducked=0.28, duck_ramp=0.35):
+    # master_gain pulls the whole station down so it sits UNDER the game SFX
+    # (0.75 = the playtest ask). Music bed and DJ voice both ride below it.
+    def __init__(self, master_gain=0.75, music_full=1.0, music_ducked=0.30,
+                 voice_level=1.0, duck_ramp=0.35):
         # 44.1k stereo, small buffer for responsive ducking.
         pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
         pygame.mixer.set_num_channels(8)
         self._voice_ch = pygame.mixer.Channel(0)   # reserved for the DJ
-        self.music_full = music_full
-        self.music_ducked = music_ducked
+        self.master_gain = master_gain
+        self.music_full = music_full * master_gain
+        self.music_ducked = music_ducked * master_gain
+        self.voice_level = voice_level * master_gain
         self.duck_ramp = duck_ramp
-        self._music_target = music_full
-        pygame.mixer.music.set_volume(music_full)
+        self._music_target = self.music_full
+        self._voice_ch.set_volume(self.voice_level)
+        pygame.mixer.music.set_volume(self.music_full)
 
     # --- music bed -------------------------------------------------------
     def play_music(self, path, fade_ms=800):
@@ -53,17 +59,20 @@ class RadioPlayer:
             time.sleep(0.02)
 
     # --- DJ voice, with ducking -----------------------------------------
-    def say(self, path, tail=0.25):
+    def say(self, path, tail=0.25, restore=True):
         """Duck the bed, play a voice clip to completion, then un-duck.
-        `tail` = extra seconds of ducking after the voice ends (breathing room)."""
+        `tail` = extra seconds of ducking after the voice ends (breathing room).
+        `restore=False` leaves the bed ducked (for a sign-off that fades out
+        right after — avoids a pointless swell before the fade)."""
         snd = pygame.mixer.Sound(path)
         self._ramp_music(self.music_ducked, self.duck_ramp)
         self._voice_ch.play(snd)
         while self._voice_ch.get_busy():
             time.sleep(0.03)
         time.sleep(tail)
-        self._music_target = self.music_full
-        self._ramp_music(self.music_full, self.duck_ramp)
+        if restore:
+            self._music_target = self.music_full
+            self._ramp_music(self.music_full, self.duck_ramp)
 
     def stop(self, fade_ms=600):
         pygame.mixer.music.fadeout(fade_ms)

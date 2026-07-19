@@ -182,18 +182,24 @@ class Library:
             else:
                 self.generic_intros.append(p)
 
-        # Song pools. SSX3 excludes the three instrumental Hub Themes (36-38):
-        # they're menu loops, not race tracks.
-        self.songs = []  # list of dicts: path, num, title, artist_id, source
+        # Song pools + a separate MENU pool. The SSX3 Hub Themes (36-38) and the
+        # Tricky Menu track aren't race songs — they're the lobby loops, so they
+        # feed the menu broadcast instead of the race shuffle.
+        self.songs = []       # race tracks: path, num, title, artist_id, source
+        self.menu_tracks = []  # lobby loops (Hub Themes + Tricky Menu)
         for p in _list_music(SSX3):
             num, title, artist = parse_song(p)
             if num is not None and num >= 36:
+                self.menu_tracks.append(dict(path=p, num=num, title=title,
+                                             artist_id=None, source="ssx3"))
                 continue
             self.songs.append(dict(path=p, num=num, title=title,
                                    artist_id=artist, source="ssx3"))
         for p in _list_music(TRICKY):
             num, title, _ = parse_song(p)
             if "menu" in title.lower():
+                self.menu_tracks.append(dict(path=p, num=num, title=title,
+                                             artist_id=None, source="tricky"))
                 continue
             self.songs.append(dict(path=p, num=num, title=title,
                                    artist_id=None, source="tricky"))

@@ -21,9 +21,10 @@ namespace RadioBigTM
     // player over a localhost socket. All pacing/selection lives in Python.
     //
     // Lifecycle mapping:
-    //   LevelManager.Start           -> START <level name>   (begin a broadcast)
-    //   Play_00_Menu posted          -> END                  (back at the menu)
-    // Both music-event suppression and the menu signal ride the same
+    //   LevelManager.Start           -> START <level name>   (race: intro -> song)
+    //   LevelManager.Finish          -> FINISH               ("FINISHED" on screen)
+    //   Play_00_Menu posted          -> MENU                 (lobby loops + banter)
+    // Music-event suppression and the menu signal ride the same
     // AkSoundEngine.PostEvent(string, GameObject) choke point the game posts music
     // from — verified in Assembly-CSharp as the single music entry point.
     [BepInPlugin("com.mtv.radiobig", "Radio Big", "0.1.0")]
@@ -102,7 +103,7 @@ namespace RadioBigTM
             Plugin.CurrentLevelName = levelEntry.name;
         }
 
-        // Course start -> tell the player to begin a broadcast.
+        // Course start -> tell the player to begin a race broadcast.
         [HarmonyPatch(typeof(LevelManager), "Start")]
         [HarmonyPostfix]
         private static void LevelManagerStart_Postfix()
@@ -111,6 +112,19 @@ namespace RadioBigTM
             string name = Plugin.CurrentLevelName ?? "";
             Plugin.Client.Send("START " + name);
             Plugin.Verbose($"[Radio] START {name}");
+        }
+
+        // Heat finished -> outro fires immediately (the "FINISHED" moment), so it
+        // never bleeds into the next race. LevelManager.Finish() is the single
+        // per-heat finish coroutine (gated on the player's Snowboarder.Finished()),
+        // not a per-racer call — verified in Assembly-CSharp.
+        [HarmonyPatch(typeof(LevelManager), "Finish")]
+        [HarmonyPostfix]
+        private static void LevelManagerFinish_Postfix()
+        {
+            if (Plugin.masterEnable == null || !Plugin.masterEnable.Value) return;
+            Plugin.Client.Send("FINISH");
+            Plugin.Verbose("[Radio] FINISH");
         }
 
         // Single choke point for BOTH jobs: suppress the game's music, and use the
@@ -127,9 +141,9 @@ namespace RadioBigTM
 
             if (in_pszEventName == Plugin.MenuEvent)
             {
-                // Returning to (or booting into) the menu ends any broadcast.
-                Plugin.Client.Send("END");
-                Plugin.Verbose("[Radio] END (menu)");
+                // Booting into / returning to the lobby -> menu broadcast.
+                Plugin.Client.Send("MENU");
+                Plugin.Verbose("[Radio] MENU");
             }
 
             if (Plugin.suppressGameMusic.Value && Plugin.MusicEvents.Contains(in_pszEventName))
