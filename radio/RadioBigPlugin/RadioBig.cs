@@ -4,7 +4,10 @@ using BepInEx.Logging;
 using HarmonyLib;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using UnityEngine;
@@ -38,9 +41,11 @@ namespace RadioBigTM
         internal static ConfigEntry<bool> verbose;
         internal static ConfigEntry<string> serverHost;
         internal static ConfigEntry<int> serverPort;
+        internal static ConfigEntry<bool> autoLaunchPlayer;
 
         internal static string CurrentLevelName;
         internal static RadioClient Client;
+        internal static Process PlayerProc;   // the bundled player, if we launched it
 
         // The game's music events (posted on MenuManager.musicPlayer). Muting
         // exactly these hands the music slot to Radio Big while leaving every SFX
@@ -70,6 +75,12 @@ namespace RadioBigTM
                 "Host the Radio Big player (radio_server.py) listens on.");
             serverPort = Config.Bind("Server", "Port", 48757,
                 "Port the Radio Big player listens on (must match radio_server.py).");
+            autoLaunchPlayer = Config.Bind("Server", "AutoLaunchPlayer", true,
+                "Launch the bundled Radio Big player automatically with the game. " +
+                "Turn off if you run the player yourself (run_radio.sh, dev).");
+
+            if (masterEnable.Value && autoLaunchPlayer.Value)
+                LaunchPlayer();
 
             Client = new RadioClient(serverHost.Value, serverPort.Value, Log,
                                      () => verbose.Value);
@@ -81,9 +92,54 @@ namespace RadioBigTM
                            $"{serverHost.Value}:{serverPort.Value}.");
         }
 
+        // Spawn the frozen player that ships next to this DLL:
+        //   plugins/RadioBigTM.dll
+        //   plugins/RadioBig/player/RadioBigPlayer   (+ _internal)
+        //   plugins/RadioBig/assets/{dj,ssx3,tricky}
+        // In managed mode the player self-exits when our socket drops (game quit
+        // or crash), so no orphan survives; OnDestroy kills it as a backstop.
+        private static void LaunchPlayer()
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                string playerDir = Path.Combine(dir, "RadioBig", "player");
+                string exe = Path.Combine(playerDir, "RadioBigPlayer");
+                string assets = Path.Combine(dir, "RadioBig", "assets");
+                if (!File.Exists(exe))
+                {
+                    Log.LogInfo($"[Radio] auto-launch skipped: no bundled player at {exe} " +
+                                "(start it manually, or this is a source/dev build).");
+                    return;
+                }
+                var psi = new ProcessStartInfo
+                {
+                    FileName = exe,
+                    Arguments = $"--managed --host {serverHost.Value} --port {serverPort.Value}",
+                    UseShellExecute = false,
+                    WorkingDirectory = playerDir,
+                };
+                if (Directory.Exists(assets))
+                    psi.EnvironmentVariables["RADIO_BIG_ASSETS"] = assets;
+                PlayerProc = Process.Start(psi);
+                Log.LogInfo($"[Radio] launched bundled player (pid {PlayerProc.Id}).");
+            }
+            catch (Exception e)
+            {
+                Log.LogWarning($"[Radio] could not auto-launch player: {e.Message}. " +
+                               "Start it manually (run_radio.sh) or check permissions.");
+            }
+        }
+
         private void OnDestroy()
         {
             if (Client != null) Client.Stop();
+            try
+            {
+                if (PlayerProc != null && !PlayerProc.HasExited)
+                    PlayerProc.Kill();
+            }
+            catch { }
         }
 
         internal static void Verbose(string msg)

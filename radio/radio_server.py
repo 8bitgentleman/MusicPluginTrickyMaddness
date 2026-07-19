@@ -30,26 +30,39 @@ DEFAULT_PORT = 48757  # arbitrary high port; must match the plugin config
 
 
 class RadioServer:
-    def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT, seed=None):
+    def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT, seed=None,
+                 managed=False):
         self.host, self.port = host, port
         self.dj = DJBrain(seed=seed)
         self._lock = threading.Lock()  # serialise command handling
+        # Managed = the plugin auto-launched us and owns our lifetime: exit once
+        # the game (our one client) disconnects, so we never orphan a silent
+        # player process after a quit or crash. Unmanaged (run_radio.sh by hand)
+        # keeps serving so the game can reconnect across restarts.
+        self.managed = managed
+        self._shutdown = threading.Event()
 
     def serve_forever(self):
         srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind((self.host, self.port))
         srv.listen(1)
-        print(f"[server] Radio Big listening on {self.host}:{self.port}", flush=True)
+        srv.settimeout(1.0)  # wake periodically to check for shutdown
+        mode = " (managed)" if self.managed else ""
+        print(f"[server] Radio Big listening on {self.host}:{self.port}{mode}",
+              flush=True)
         try:
-            while True:
-                conn, addr = srv.accept()
+            while not self._shutdown.is_set():
+                try:
+                    conn, addr = srv.accept()
+                except socket.timeout:
+                    continue
                 print(f"[server] client connected: {addr}", flush=True)
                 threading.Thread(target=self._handle, args=(conn,),
                                  daemon=True).start()
         except KeyboardInterrupt:
             print("\n[server] shutting down", flush=True)
-            self.dj.stop_course(fade_ms=400)
+            self.dj.stop_all(fade_ms=400)
         finally:
             srv.close()
 
@@ -80,6 +93,9 @@ class RadioServer:
             # Connection gone (the game quit / crashed) -> silence the radio too.
             print("[server] client disconnected -> stopping broadcast", flush=True)
             self.dj.stop_all(fade_ms=400)
+            if self.managed:  # plugin owns us -> shut down with the game
+                print("[server] managed mode -> exiting", flush=True)
+                self._shutdown.set()
 
     def _dispatch(self, line):
         parts = line.split(None, 1)
@@ -112,8 +128,12 @@ def main(argv=None):
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--managed", action="store_true",
+                    help="exit once the game (client) disconnects — used when "
+                         "the plugin auto-launches and owns the player lifetime")
     args = ap.parse_args(argv)
-    RadioServer(args.host, args.port, args.seed).serve_forever()
+    RadioServer(args.host, args.port, args.seed,
+                managed=args.managed).serve_forever()
     return 0
 
 

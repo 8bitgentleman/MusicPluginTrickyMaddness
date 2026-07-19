@@ -16,14 +16,47 @@ Pure stdlib, no third-party deps — this module is import-safe with no audio.
 """
 import os
 import re
+import sys
 import glob
 
-# --- asset locations -----------------------------------------------------
-RADIO = "/Users/mtvogel/Downloads/claude_scratch/Radio_Big/Radio_Big_Sections"
-SSX3 = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX 3 [Soundtrack⧸Gamerip]"
-TRICKY = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX Tricky (Complete Soundtrack OST)"
-
 MUSIC_EXTS = (".mp3", ".ogg", ".wav", ".m4a")
+
+
+# --- asset locations ------------------------------------------------------
+# Three audio pools: the Radio Big DJ voice clips, and the two soundtracks.
+# Resolved at import so the same code runs from source (the author's machine)
+# AND as a frozen, shipped bundle. Precedence:
+#   1. RADIO_BIG_ASSETS  -> <dir>/{dj,ssx3,tricky}   (the shipped layout; the
+#      plugin sets this when it auto-launches the frozen player)
+#   2. per-pool overrides RADIO_BIG_{DJ,SSX3,TRICKY}
+#   3. an `assets/` folder beside a PyInstaller-frozen executable
+#   4. the original dev paths (running from source, unfrozen)
+_DEV_DJ = "/Users/mtvogel/Downloads/claude_scratch/Radio_Big/Radio_Big_Sections"
+_DEV_SSX3 = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX 3 [Soundtrack⧸Gamerip]"
+_DEV_TRICKY = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX Tricky (Complete Soundtrack OST)"
+
+
+def _resolve_assets():
+    base = os.environ.get("RADIO_BIG_ASSETS")
+    if not base and getattr(sys, "frozen", False):
+        # Frozen: look for assets/ next to the executable, then one level up
+        # (onedir puts the exe in player/, assets sit in ../assets).
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        for cand in (os.path.join(exe_dir, "assets"),
+                     os.path.join(os.path.dirname(exe_dir), "assets")):
+            if os.path.isdir(cand):
+                base = cand
+                break
+    dj = os.environ.get("RADIO_BIG_DJ") or (
+        os.path.join(base, "dj") if base else _DEV_DJ)
+    ssx3 = os.environ.get("RADIO_BIG_SSX3") or (
+        os.path.join(base, "ssx3") if base else _DEV_SSX3)
+    tricky = os.environ.get("RADIO_BIG_TRICKY") or (
+        os.path.join(base, "tricky") if base else _DEV_TRICKY)
+    return dj, ssx3, tricky
+
+
+RADIO, SSX3, TRICKY = _resolve_assets()
 
 
 # --- DJ voice clips -------------------------------------------------------

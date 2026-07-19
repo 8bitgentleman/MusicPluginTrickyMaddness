@@ -402,3 +402,11 @@ FodyWeavers.xsd
 
 # Radio Big built plugin (regenerate via radio/RadioBigPlugin/build.sh)
 radio/RadioBigPlugin/*.dll
+
+# Radio Big packaging artifacts (regenerate via radio/freeze.sh + radio/package.sh).
+# The frozen player, PyInstaller scratch, and the ~1GB assembled release never
+# belong in git — they're rebuilt from source + the local audio libraries.
+radio/dist/
+radio/build/
+radio/_release/
+radio/*.spec
