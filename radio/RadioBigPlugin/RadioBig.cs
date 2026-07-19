@@ -104,11 +104,19 @@ namespace RadioBigTM
             {
                 string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
                 string playerDir = Path.Combine(dir, "RadioBig", "player");
-                string exe = Path.Combine(playerDir, "RadioBigPlayer");
                 string assets = Path.Combine(dir, "RadioBig", "assets");
-                if (!File.Exists(exe))
+                // PyInstaller names the frozen binary "RadioBigPlayer" on mac/linux
+                // and "RadioBigPlayer.exe" on Windows. Probe both so one bundle
+                // layout works on every platform's freeze (whichever ships).
+                string exe = null;
+                foreach (string name in new[] { "RadioBigPlayer.exe", "RadioBigPlayer" })
                 {
-                    Log.LogInfo($"[Radio] auto-launch skipped: no bundled player at {exe} " +
+                    string cand = Path.Combine(playerDir, name);
+                    if (File.Exists(cand)) { exe = cand; break; }
+                }
+                if (exe == null)
+                {
+                    Log.LogInfo($"[Radio] auto-launch skipped: no bundled player in {playerDir} " +
                                 "(start it manually, or this is a source/dev build).");
                     return;
                 }
