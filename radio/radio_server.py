@@ -54,24 +54,32 @@ class RadioServer:
             srv.close()
 
     def _handle(self, conn):
-        with conn, conn.makefile("r", encoding="utf-8", newline="\n") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line:
-                    continue
-                try:
-                    reply = self._dispatch(line)
-                except Exception as e:  # never let a bad line kill the connection
-                    reply = f"ERR {e}"
-                if reply is None:  # QUIT
-                    break
-                try:
-                    conn.sendall((reply + "\n").encode("utf-8"))
-                except OSError:
-                    break
-        # Connection gone (the game quit / crashed) -> silence the radio too.
-        print("[server] client disconnected -> stopping broadcast", flush=True)
-        self.dj.stop_all(fade_ms=400)
+        # A hard game crash sends an RST, so the read below raises
+        # ConnectionResetError rather than returning EOF. Wrap the whole session
+        # in try/finally so the radio is silenced on ANY teardown — clean quit,
+        # QUIT verb, or crash-RST — instead of the exception skipping stop_all.
+        try:
+            with conn, conn.makefile("r", encoding="utf-8", newline="\n") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    try:
+                        reply = self._dispatch(line)
+                    except Exception as e:  # never let a bad line kill the connection
+                        reply = f"ERR {e}"
+                    if reply is None:  # QUIT
+                        break
+                    try:
+                        conn.sendall((reply + "\n").encode("utf-8"))
+                    except OSError:
+                        break
+        except OSError as e:  # RST / reset by peer when the game crashes
+            print(f"[server] client link lost ({e})", flush=True)
+        finally:
+            # Connection gone (the game quit / crashed) -> silence the radio too.
+            print("[server] client disconnected -> stopping broadcast", flush=True)
+            self.dj.stop_all(fade_ms=400)
 
     def _dispatch(self, line):
         parts = line.split(None, 1)
