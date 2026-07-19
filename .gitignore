@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 # Built plugin (produced by build.sh)
 /MusicPluginTrickyMaddness.dll
+
+# Radio Big built plugin (regenerate via radio/RadioBigPlugin/build.sh)
+radio/RadioBigPlugin/*.dll
