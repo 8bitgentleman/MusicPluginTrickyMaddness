@@ -39,11 +39,19 @@ _DEV_TRICKY = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX Tricky (Com
 def _resolve_assets():
     base = os.environ.get("RADIO_BIG_ASSETS")
     if not base and getattr(sys, "frozen", False):
-        # Frozen: look for assets/ next to the executable, then one level up
-        # (onedir puts the exe in player/, assets sit in ../assets).
+        # Frozen: look for assets/ relative to the executable. The shipped layout
+        # is RadioBig/players/<os>/RadioBigPlayer(.exe) with assets at
+        # RadioBig/assets — i.e. TWO levels up from the exe dir. We also probe
+        # next-to-exe and one-up for the legacy flat layout. This position-based
+        # search is what makes the player self-locating when RADIO_BIG_ASSETS
+        # doesn't reach the child (env vars don't reliably propagate to a
+        # wine-spawned process — the CrossOver "muted but silent" bug).
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        up1 = os.path.dirname(exe_dir)
+        up2 = os.path.dirname(up1)
         for cand in (os.path.join(exe_dir, "assets"),
-                     os.path.join(os.path.dirname(exe_dir), "assets")):
+                     os.path.join(up1, "assets"),
+                     os.path.join(up2, "assets")):
             if os.path.isdir(cand):
                 base = cand
                 break
@@ -57,6 +65,23 @@ def _resolve_assets():
 
 
 RADIO, SSX3, TRICKY = _resolve_assets()
+
+
+def _log_asset_diag():
+    """Print where the player resolved its audio and how much it found. This is
+    the single most useful line when the radio is silent: an empty count means
+    the library never loaded (bad/missing assets path) — the DJ then draws None
+    and every broadcast exits before it can log a track."""
+    src = os.environ.get("RADIO_BIG_ASSETS") or ("(frozen search)"
+          if getattr(sys, "frozen", False) else "(dev paths)")
+    print(f"[library] RADIO_BIG_ASSETS={src}", flush=True)
+    for label, d in (("dj", RADIO), ("ssx3", SSX3), ("tricky", TRICKY)):
+        n = len(glob.glob(os.path.join(d, "*.mp3"))) if os.path.isdir(d) else -1
+        state = f"{n} mp3" if n >= 0 else "MISSING DIR"
+        print(f"[library]   {label:6} -> {d}  [{state}]", flush=True)
+
+
+_log_asset_diag()
 
 
 # --- DJ voice clips -------------------------------------------------------
