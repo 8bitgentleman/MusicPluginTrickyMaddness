@@ -6,7 +6,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
 using System.Threading;
@@ -50,6 +49,7 @@ namespace RadioBigTM
         internal static string CurrentLevelName;
         internal static RadioClient Client;
         internal static Process PlayerProc;   // the bundled player, if we launched it
+        internal static string CmdFile;       // command spool the player tails (file transport)
 
         // The game's music events (posted on MenuManager.musicPlayer). Muting
         // exactly these hands the music slot to Radio Big while leaving every SFX
@@ -67,6 +67,12 @@ namespace RadioBigTM
         {
             Instance = this;
             Log = Logger;
+            // Survive scene loads. Deduced from the logs (2026-07-19): OnDestroy was
+            // firing on the menu->race scene change, NOT at quit — it disposed the
+            // command-file handle and KILLED the player process right as a race began,
+            // which is what left every playtest silent (socket AND file, all builds).
+            // Pinning the plugin GameObject across scenes stops the spurious teardown.
+            DontDestroyOnLoad(gameObject);
 
             masterEnable = Config.Bind("General", "Enabled", true,
                 "Master switch for Radio Big.");
@@ -83,17 +89,34 @@ namespace RadioBigTM
                 "Launch the bundled Radio Big player automatically with the game. " +
                 "Turn off if you run the player yourself (run_radio.sh, dev).");
 
+            // Transport = a shared command file (NOT a socket). The game's Unity
+            // Mono under wine (CrossOver) never delivered our localhost datagrams to
+            // the player despite the send succeeding and the transport working in
+            // every standalone wine repro — an unreproducible Unity-Mono-under-wine
+            // socket black hole (see radio/ notes: 7 dead socket playtests). The
+            // filesystem is shared by both wine processes and touches none of that:
+            // the plugin appends verbs here, the player tails them. Truncate per
+            // launch so the player never replays a previous session's STARTs.
+            string dllDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            CmdFile = Path.Combine(dllDir, "RadioBig", "radio.cmd");
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(CmdFile));
+                File.WriteAllText(CmdFile, "");
+            }
+            catch (Exception e) { Logger.LogWarning($"[Radio] could not reset command file: {e.Message}"); }
+
             if (masterEnable.Value && autoLaunchPlayer.Value)
                 LaunchPlayer();
 
-            Client = new RadioClient(serverHost.Value, serverPort.Value, Log,
-                                     () => verbose.Value);
+            Client = new RadioClient(CmdFile, Log, () => verbose.Value);
             Client.Start();
             Client.Send("HELLO");
 
             new Harmony("com.mtv.radiobig").PatchAll(typeof(Patches));
-            Logger.LogInfo("Radio Big loaded. Music slot -> external player at " +
-                           $"{serverHost.Value}:{serverPort.Value}.");
+            // Transport tag in the load line so a log unambiguously identifies which
+            // build is live (we chased a lot of look-alike failures before this).
+            Logger.LogInfo($"Radio Big loaded [file]. Music slot -> external player via {CmdFile}");
         }
 
         // Detect the platform family so we pick the matching frozen player. Mono's
@@ -113,8 +136,12 @@ namespace RadioBigTM
         //   plugins/RadioBig/players/<windows|mac-arm64|linux>/RadioBigPlayer[.exe]  (+ _internal)
         //   plugins/RadioBig/assets/{dj,ssx3,tricky}
         // (The legacy flat plugins/RadioBig/player/ is still honored as a fallback.)
-        // In managed mode the player self-exits when our socket drops (game quit
-        // or crash), so no orphan survives; OnDestroy kills it as a backstop.
+        // How the player stops, in order of reliability: (1) it watches our PID
+        // (--gamepid) and exits the instant the game process dies — the only signal
+        // that works under wine, where Unity never fires OnApplicationQuit; (2) on a
+        // native/graceful quit OnApplicationQuit also sends an explicit QUIT for an
+        // immediate stop; (3) the managed-grace timer (command file quiet 30 s) is a
+        // last-ditch backstop. No orphan survives a quit on any target.
         private static void LaunchPlayer()
         {
             try
@@ -152,16 +179,37 @@ namespace RadioBigTM
                                 $"{Path.Combine(root, "players")} (run it from source, or this is a dev build).");
                     return;
                 }
+                // Pass the audio root BOTH as a CLI arg and an env var. Under wine
+                // (CrossOver) an inherited env var may not reach the child, leaving
+                // the player with an empty library -> game music muted but the radio
+                // silent. The CLI arg survives that; the env var is kept for the
+                // native path. Quote it — the path contains "Program Files (x86)".
+                bool haveAssets = Directory.Exists(assets);
+                // File transport: the player tails --cmdfile (host/port unused now).
+                // --gamepid is the RELIABLE quit signal: the player watches our PID
+                // and exits the instant the game dies. Under wine, Unity never fires
+                // OnApplicationQuit (verified in the logs), so no in-game quit event
+                // ever reaches the player — but the process going away is unmissable,
+                // and the player + game share a PID namespace (spawned child) on both
+                // native macOS and wine, so the watch resolves on either target.
+                int gamePid = Process.GetCurrentProcess().Id;
+                string args = $"--managed --gamepid {gamePid} --cmdfile \"{Plugin.CmdFile}\"";
+                if (haveAssets) args += $" --assets \"{assets}\"";
+                Log.LogInfo(haveAssets
+                    ? $"[Radio] assets -> {assets}"
+                    : $"[Radio] WARNING: assets dir not found at {assets} — the player " +
+                      "will fall back to its bundled search; radio may be silent.");
+
                 var psi = new ProcessStartInfo
                 {
                     FileName = exe,
-                    Arguments = $"--managed --host {serverHost.Value} --port {serverPort.Value}",
+                    Arguments = args,
                     UseShellExecute = false,
                     WorkingDirectory = playerDir,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                 };
-                if (Directory.Exists(assets))
+                if (haveAssets)
                     psi.EnvironmentVariables["RADIO_BIG_ASSETS"] = assets;
 
                 // CRITICAL: the game boots via BepInEx/Doorstop, which exports
@@ -196,13 +244,36 @@ namespace RadioBigTM
 
         private void OnDestroy()
         {
-            if (Client != null) Client.Stop();
+            // This fires on Tricky Madness's scene transitions, NOT just at quit —
+            // proven in the logs, and DontDestroyOnLoad did not stop it. So we must
+            // tear down NOTHING here: calling Client.Stop() killed the keepalive thread
+            // mid-race, the player's managed grace then lapsed, and the music cut out
+            // ~30 s into the level (and never returned, because the player had exited
+            // by the time we got back to the menu). The static client and its keepalive
+            // thread deliberately OUTLIVE this MonoBehaviour; they die with the game
+            // process at a real quit, at which point the player self-exits on its grace
+            // timer. Log only — do not stop the client, do not kill the player.
+            Log.LogInfo("[Radio] OnDestroy fired (ignored — client keeps running across scenes).");
+        }
+
+        // The RELIABLE quit signal. Unlike OnDestroy (which fires on every scene
+        // change), Unity raises OnApplicationQuit only when the game is actually
+        // exiting — so here, and ONLY here, we tell the player to stop. Send QUIT so
+        // it fades out and exits cleanly right now instead of leaving it to the 30 s
+        // managed-grace backstop (which is why a quit felt like an uncontrollable
+        // orphan: the player was reaped abruptly with the game, never told to stop).
+        // The write is synchronous and flushed on this thread, so QUIT reaches the
+        // file before the process dies; Stop() then closes our handle. The grace timer
+        // remains the backstop for a hard kill, where OnApplicationQuit never fires.
+        private void OnApplicationQuit()
+        {
             try
             {
-                if (PlayerProc != null && !PlayerProc.HasExited)
-                    PlayerProc.Kill();
+                Client?.Send("QUIT");
+                Client?.Stop();
+                Log.LogInfo("[Radio] OnApplicationQuit -> QUIT sent, client stopped.");
             }
-            catch { }
+            catch (Exception e) { Log.LogWarning($"[Radio] OnApplicationQuit error: {e.Message}"); }
         }
 
         internal static void Verbose(string msg)
@@ -274,92 +345,154 @@ namespace RadioBigTM
         }
     }
 
-    // Background socket sender: the Unity main thread only ever enqueues a line;
-    // all connect/reconnect/write happens here so game frames never block on I/O.
-    // Reconnects transparently so the player can be (re)started at any time; a
-    // bounded backlog keeps an early START alive until the server is up.
+    // Background command writer: the Unity main thread only ever enqueues a verb;
+    // the worker appends it to the shared command file so game frames never block on
+    // I/O. Transport is a FILE, not a socket — see the note in Awake: the game's
+    // Unity Mono under wine silently swallowed every localhost datagram we sent
+    // (7 dead socket playtests, transport proven working in every standalone wine
+    // repro). The filesystem is shared by both wine processes and sidesteps the
+    // whole wine-networking / Unity-Mono socket layer. A bounded backlog keeps an
+    // early START alive until the player has opened the file.
     internal class RadioClient
     {
-        private readonly string _host;
-        private readonly int _port;
         private readonly ManualLogSource _log;
         private readonly Func<bool> _verbose;
-        private readonly Queue<string> _queue = new Queue<string>();
-        private readonly object _gate = new object();
-        private Thread _worker;
+        private readonly string _cmdFile;
+        private readonly object _writeLock = new object();  // serialises the two writers
+        private Thread _keepalive;
         private volatile bool _running;
-        private const int MaxBacklog = 64;
+        // One long-lived append handle for the whole session (FileShare.ReadWrite so
+        // the player keeps tailing concurrently). Opened once, up front, off the game
+        // thread's first touch — never re-opened.
+        private FileStream _fs;
+        private StreamWriter _sw;
+        // Time since the last write, shared by both writers to drive the keepalive.
+        private readonly System.Diagnostics.Stopwatch _sinceSend =
+            System.Diagnostics.Stopwatch.StartNew();
+        // Keepalive: append a PING if we've been idle this long, so the player's
+        // managed grace never lapses during a quiet menu. During play the real events
+        // reset it, so the keepalive only matters at idle.
+        private const int KeepAliveMs = 5000;
 
-        public RadioClient(string host, int port, ManualLogSource log, Func<bool> verbose)
+        public RadioClient(string cmdFile, ManualLogSource log, Func<bool> verbose)
         {
-            _host = host; _port = port; _log = log; _verbose = verbose;
+            _cmdFile = cmdFile; _log = log; _verbose = verbose;
         }
 
         public void Start()
         {
+            lock (_writeLock) { if (!TryOpenHandle()) return; }
             _running = true;
-            _worker = new Thread(Run) { IsBackground = true, Name = "RadioBigSender" };
-            _worker.Start();
+            _keepalive = new Thread(KeepAliveLoop)
+                { IsBackground = true, Name = "RadioBigKeepAlive" };
+            _keepalive.Start();
+        }
+
+        // (Re)open the persistent append handle. Caller holds _writeLock.
+        private bool TryOpenHandle()
+        {
+            try
+            {
+                _fs = new FileStream(_cmdFile, FileMode.Append, FileAccess.Write,
+                                     FileShare.ReadWrite);
+                _sw = new StreamWriter(_fs, new UTF8Encoding(false));
+                return true;
+            }
+            catch (Exception e)
+            {
+                _log.LogWarning($"[Radio] could not open command file: {e.GetType().Name}: {e.Message}");
+                _sw = null; _fs = null;
+                return false;
+            }
         }
 
         public void Stop()
         {
             _running = false;
-            lock (_gate) { Monitor.PulseAll(_gate); }
+            lock (_writeLock)
+            {
+                try { _sw?.Dispose(); _fs?.Dispose(); } catch { }
+                _sw = null; _fs = null;
+            }
+            _log.LogInfo("[Radio] client stopped (command handle closed).");
         }
 
+        // Called on the GAME thread from the Harmony patches, and writes RIGHT THERE,
+        // synchronously. This is the crux of the whole fix: every prior design queued
+        // the line for a background thread to write, but under the game's Unity Mono
+        // on wine the GC suspends managed threads at each scene load and wine never
+        // resumes a *waiting* one — so the sender thread went permanently dead the
+        // instant the first real command (MENU/START, always mid scene-load) arrived,
+        // and no game event ever reached the player (dead across BOTH socket and file
+        // transports, identical signature). The game thread is the one wine always
+        // resumes, and the write is a microsecond local append, so we just do it here.
         public void Send(string line)
         {
             if (string.IsNullOrEmpty(line)) return;
-            lock (_gate)
+            lock (_writeLock)
             {
-                if (_queue.Count >= MaxBacklog) _queue.Dequeue();  // drop oldest
-                _queue.Enqueue(line);
-                Monitor.PulseAll(_gate);
+                // Self-heal: if a spurious OnDestroy (scene change) disposed the handle,
+                // reopen it and keep writing. The command stream must outlive the
+                // plugin's MonoBehaviour — losing it mid-race is what silenced the mod.
+                if (_sw == null && !TryOpenHandle()) return;
+                try
+                {
+                    AppendLine(line);
+                    _sinceSend.Restart();
+                    if (_verbose()) _log.LogInfo($"[Radio] wrote: {line}");
+                }
+                catch (Exception e)
+                {
+                    if (_verbose())
+                        _log.LogWarning($"[Radio] write error ({line}): {e.GetType().Name}: {e.Message}");
+                }
             }
         }
 
-        private void Run()
+        // Keepalive ONLY. If this background thread gets GC-suspended-and-abandoned at
+        // a scene load (see Send), the sole consequence is that a long idle menu after
+        // that point stops PINGing — music playback, driven by game-thread Send, is
+        // unaffected. Real events keep the grace alive whenever anything is happening.
+        private void KeepAliveLoop()
         {
-            TcpClient tcp = null;
-            NetworkStream stream = null;
             while (_running)
             {
-                string line = null;
-                lock (_gate)
+                Thread.Sleep(1000);
+                if (!_running) break;
+                if (_sinceSend.ElapsedMilliseconds < KeepAliveMs) continue;
+                lock (_writeLock)
                 {
-                    while (_running && _queue.Count == 0)
-                        Monitor.Wait(_gate, 500);
-                    if (!_running) break;
-                    if (_queue.Count > 0) line = _queue.Peek();
-                }
-                if (line == null) continue;
-
-                try
-                {
-                    if (tcp == null || !tcp.Connected)
+                    if (_sw == null) break;
+                    try
                     {
-                        tcp = new TcpClient();
-                        tcp.Connect(_host, _port);   // fast on localhost
-                        stream = tcp.GetStream();
+                        AppendLine("PING");
+                        _sinceSend.Restart();
+                        if (_verbose()) _log.LogInfo("[Radio] wrote: PING (keepalive)");
                     }
-                    byte[] bytes = Encoding.UTF8.GetBytes(line + "\n");
-                    stream.Write(bytes, 0, bytes.Length);
-                    stream.Flush();
-                    lock (_gate) { if (_queue.Count > 0) _queue.Dequeue(); }  // sent; drop it
-                    if (_verbose())
-                        _log.LogInfo($"[Radio] sent: {line}");
-                }
-                catch (Exception)
-                {
-                    // Server not up yet / dropped. Close and retry shortly; the
-                    // line stays queued (we only Peek'd) so it isn't lost.
-                    try { if (tcp != null) tcp.Close(); } catch { }
-                    tcp = null; stream = null;
-                    Thread.Sleep(1000);
+                    catch (Exception e)
+                    {
+                        if (_verbose())
+                            _log.LogWarning($"[Radio] write error (PING): {e.GetType().Name}: {e.Message}");
+                    }
                 }
             }
-            try { if (tcp != null) tcp.Close(); } catch { }
+        }
+
+        // Append one verb to the session's persistent handle and flush to the OS so the
+        // player's reader sees it next poll. Caller MUST hold _writeLock (both writers
+        // do). The enter/exit probes bracket the actual I/O so a hang is unambiguous in
+        // the log; they earned their keep proving the wedge was the thread, not the write.
+        private void AppendLine(string line)
+        {
+            bool v = _verbose();
+            if (v) _log.LogInfo($"[Radio] append-enter: {line}");
+            _sw.Write(line + "\n");
+            _sw.Flush();       // char buffer -> FileStream -> OS cache; the reader is
+                               // a separate process but shares the host FS, so an OS
+                               // flush is enough for it to see the bytes (no need for
+                               // a heavier FlushFileBuffers, which is likelier to
+                               // block under wine mid-scene-load).
+            if (v) _log.LogInfo($"[Radio] append-exit: {line}");
         }
     }
 }

@@ -1,42 +1,115 @@
 #!/usr/bin/env python3
 """Radio Big IPC front-end.
 
-A tiny localhost socket the BepInEx plugin talks to. The game side stays dumb:
-it forwards events, this server owns the DJBrain and all the audio. One line =
-one command (newline-terminated, case-insensitive verb):
+The BepInEx plugin forwards game events here; this server owns the DJBrain and
+all the audio. Two transports, same verbs and dispatch:
 
-    HELLO                 ->  OK Radio Big <version>
-    PING                  ->  PONG
+  * --cmdfile <path>  (what the game uses): tail a shared command file the plugin
+    appends to. This exists because under wine (CrossOver) the game's Unity Mono
+    never delivered our localhost datagrams to the player — the send succeeded and
+    every standalone wine repro worked, but in-game nothing arrived (7 dead socket
+    playtests). The filesystem is shared by both wine processes and sidesteps the
+    whole wine-networking / Unity-Mono socket layer. It's also debuggable: the
+    command file on disk shows exactly what the plugin wrote.
+  * default: bind a localhost UDP socket (dev / native use).
+
+One line = one command (newline-terminated, case-insensitive verb):
+
+    HELLO                 ->  hello / heartbeat (no-op)
+    PING                  ->  heartbeat (keeps managed grace alive)
     START <level name>    ->  race broadcast (intro -> song)
     FINISH                ->  race finished: outro NOW, then fade
     MENU                  ->  lobby broadcast (menu loops + banter)
     EVENT <combo|knockdown>  ->  ducked reactive DJ line
-    QUIT                  ->  close this connection
+    QUIT                  ->  stop the music and exit
 
-Deliberately single-purpose and forgiving: unknown verbs get `ERR ...` but never
-crash the server. A dropped connection (the game quit) stops the music — that's
-the one place the socket lifetime maps to the broadcast lifetime.
+UDP, not TCP, on purpose: the plugin runs as Windows Mono under wine (CrossOver),
+where Mono's Socket send/recv timeouts, Poll waits, and linger are all ignored,
+so every connection-oriented design either hung the sender or closed before we
+read the line (the "muted but silent" CrossOver bug). UDP has no connect/close/
+reply/timeout to depend on — the plugin just fires datagrams. We never reply;
+the plugin never reads. Deliberately forgiving: a bad line is logged, never
+fatal. Because UDP is connectionless there's no disconnect to detect a quit, so
+managed mode leans on a heartbeat (see MANAGED_GRACE_SECONDS).
 """
 import argparse
+import os
 import socket
 import sys
 import threading
+import time
+
+# --assets <dir> is folded into the environment BEFORE dj_brain (-> dj_library)
+# is imported, because the library resolves its asset paths at import time. The
+# plugin passes it both ways; the CLI arg is the reliable one under wine, where an
+# inherited env var may not reach the child (the CrossOver "muted but silent"
+# bug). setdefault so a real env var, if it did propagate, still wins.
+for _i, _a in enumerate(sys.argv):
+    if _a == "--assets" and _i + 1 < len(sys.argv):
+        os.environ.setdefault("RADIO_BIG_ASSETS", sys.argv[_i + 1])
 
 from dj_brain import DJBrain
 
 # Keep in sync with the plugin's BepInPlugin version in RadioBigPlugin/RadioBig.cs.
-# Only surfaced in the HELLO reply (which the plugin doesn't currently read), so
-# this copy is cosmetic — the plugin attr is the one bug reporters actually see.
+# Purely cosmetic now (UDP: we send no reply) — the plugin attr is the version a
+# bug reporter's log actually shows. Sync it anyway.
 VERSION = "1.0.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 48757  # arbitrary high port; must match the plugin config
 
+# Managed heartbeat window. UDP is connectionless, so there's no dropped socket
+# to tell us the game quit. Instead the plugin PINGs every few seconds while it
+# runs; if we go this long with NO datagram at all, the game has quit or crashed,
+# so we silence the music and exit rather than orphan a player process. Comfortably
+# longer than the plugin's KeepAliveMs (5s) so ordinary jitter never trips it.
+MANAGED_GRACE_SECONDS = 30.0
+
+
+def _pid_alive(pid):
+    """Is process `pid` still running? The PRIMARY quit signal in managed mode.
+
+    Under wine (CrossOver) Unity never fires OnApplicationQuit, so the plugin
+    can't send us a QUIT on game exit — proven in the logs: the game quit, no
+    QUIT was ever written, and the player played on until its console window was
+    closed by hand. So instead of trusting the game to tell us, we watch its
+    process directly and exit the instant it's gone. The plugin passes its own
+    PID (--gamepid); we poll it. Same PID namespace on both targets: the player
+    is spawned by the game, so on native macOS both are mac processes and under
+    wine both live in the same wineserver, so the query resolves either way.
+
+    None => not monitoring (return alive). Windows/wine goes through kernel32
+    (os.kill on Windows TERMINATES rather than probes, so it must not be used);
+    POSIX uses the signal-0 probe.
+    """
+    if pid is None:
+        return True
+    if sys.platform == "win32":
+        import ctypes
+        SYNCHRONIZE = 0x00100000
+        WAIT_TIMEOUT = 0x00000102  # object not signalled => still running
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(SYNCHRONIZE, False, int(pid))
+        if not h:
+            return False  # gone (or already reaped)
+        try:
+            return k.WaitForSingleObject(h, 0) == WAIT_TIMEOUT
+        finally:
+            k.CloseHandle(h)
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, just not ours to signal
+
 
 class RadioServer:
     def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT, seed=None,
-                 managed=False):
+                 managed=False, game_pid=None):
         self.host, self.port = host, port
         self.dj = DJBrain(seed=seed)
+        self.game_pid = game_pid  # watch this; exit when it dies (managed)
         self._lock = threading.Lock()  # serialise command handling
         # Managed = the plugin auto-launched us and owns our lifetime: exit once
         # the game (our one client) disconnects, so we never orphan a silent
@@ -46,84 +119,138 @@ class RadioServer:
         self._shutdown = threading.Event()
 
     def serve_forever(self):
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind((self.host, self.port))
-        srv.listen(1)
-        srv.settimeout(1.0)  # wake periodically to check for shutdown
+        srv.settimeout(1.0)  # wake periodically to check heartbeat / shutdown
         mode = " (managed)" if self.managed else ""
-        print(f"[server] Radio Big listening on {self.host}:{self.port}{mode}",
+        print(f"[server] Radio Big listening on {self.host}:{self.port}{mode} [udp]",
               flush=True)
+        last_beat = time.time()  # last time we heard ANY datagram
+        heard_any = False
         try:
             while not self._shutdown.is_set():
+                # Same primary teardown as the file path: exit the moment the game
+                # process dies, rather than waiting out the heartbeat grace.
+                if self.managed and not _pid_alive(self.game_pid):
+                    print("[server] game process gone -> stopping", flush=True)
+                    self.dj.stop_all(fade_ms=400)
+                    break
                 try:
-                    conn, addr = srv.accept()
+                    data, addr = srv.recvfrom(65535)
                 except socket.timeout:
+                    # No datagram this tick. In managed mode, a long silence means
+                    # the game quit/crashed (UDP has no disconnect to catch), so
+                    # stop the music and exit instead of orphaning this process.
+                    if (self.managed and heard_any
+                            and time.time() - last_beat > MANAGED_GRACE_SECONDS):
+                        print("[server] no heartbeat within grace -> stopping",
+                              flush=True)
+                        self.dj.stop_all(fade_ms=400)
+                        break
                     continue
-                print(f"[server] client connected: {addr}", flush=True)
-                threading.Thread(target=self._handle, args=(conn,),
-                                 daemon=True).start()
+                last_beat = time.time()
+                heard_any = True
+                # One datagram may carry one line (normal) or a few if the plugin
+                # ever coalesces; splitlines handles both and the trailing "\n".
+                for raw in data.decode("utf-8", "replace").splitlines():
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    try:
+                        if self._dispatch(line) is False:  # QUIT
+                            print("[server] QUIT -> stopping", flush=True)
+                            self.dj.stop_all(fade_ms=400)
+                            self._shutdown.set()
+                            break
+                    except Exception as e:  # never let a bad line kill the server
+                        print(f"[server] dispatch error ({line!r}): {e}", flush=True)
         except KeyboardInterrupt:
             print("\n[server] shutting down", flush=True)
             self.dj.stop_all(fade_ms=400)
         finally:
             srv.close()
 
-    def _handle(self, conn):
-        # A hard game crash sends an RST, so the read below raises
-        # ConnectionResetError rather than returning EOF. Wrap the whole session
-        # in try/finally so the radio is silenced on ANY teardown — clean quit,
-        # QUIT verb, or crash-RST — instead of the exception skipping stop_all.
-        try:
-            with conn, conn.makefile("r", encoding="utf-8", newline="\n") as f:
-                for raw in f:
+    def serve_file(self, path):
+        # File transport: tail a shared command file the plugin appends verbs to.
+        # This is the path the game actually uses under wine (CrossOver), where
+        # localhost datagrams from the game's Unity Mono never reached us despite
+        # sending cleanly — an unreproducible socket black hole. The filesystem is
+        # shared by both wine processes and touches none of that. We re-open and
+        # read-from-offset each poll (bulletproof across wine/native vs keeping a
+        # handle open past EOF). Same managed-heartbeat teardown as the UDP path:
+        # if the file stops growing for the grace window, the game has gone.
+        print(f"[server] Radio Big reading commands from {path} (managed={self.managed}) [file]",
+              flush=True)
+        pos = 0
+        last = time.time()
+        started = False
+        buf = ""
+        while not self._shutdown.is_set():
+            # Primary managed teardown: the game process is gone. Near-instant and
+            # wine-proof (no OnApplicationQuit needed). The file-quiet grace below
+            # stays as a backstop for a crash where we somehow keep a live PID.
+            if self.managed and not _pid_alive(self.game_pid):
+                print("[server] game process gone -> stopping", flush=True)
+                self.dj.stop_all(fade_ms=400)
+                break
+            chunk = ""
+            try:
+                with open(path, "rb") as f:
+                    f.seek(pos)
+                    data = f.read()
+                    pos = f.tell()
+                chunk = data.decode("utf-8", "replace")
+            except FileNotFoundError:
+                pass  # plugin hasn't created it yet; keep waiting
+            if chunk:
+                last = time.time()
+                started = True
+                buf += chunk
+                lines = buf.split("\n")
+                buf = lines.pop()  # keep any trailing partial line for next read
+                for raw in lines:
                     line = raw.strip()
                     if not line:
                         continue
                     try:
-                        reply = self._dispatch(line)
-                    except Exception as e:  # never let a bad line kill the connection
-                        reply = f"ERR {e}"
-                    if reply is None:  # QUIT
-                        break
-                    try:
-                        conn.sendall((reply + "\n").encode("utf-8"))
-                    except OSError:
-                        break
-        except OSError as e:  # RST / reset by peer when the game crashes
-            print(f"[server] client link lost ({e})", flush=True)
-        finally:
-            # Connection gone (the game quit / crashed) -> silence the radio too.
-            print("[server] client disconnected -> stopping broadcast", flush=True)
-            self.dj.stop_all(fade_ms=400)
-            if self.managed:  # plugin owns us -> shut down with the game
-                print("[server] managed mode -> exiting", flush=True)
-                self._shutdown.set()
+                        if self._dispatch(line) is False:  # QUIT
+                            print("[server] QUIT -> stopping", flush=True)
+                            self.dj.stop_all(fade_ms=400)
+                            self._shutdown.set()
+                            break
+                    except Exception as e:  # never let a bad line kill the server
+                        print(f"[server] dispatch error ({line!r}): {e}", flush=True)
+                continue  # drain fully before sleeping
+            if (self.managed and started
+                    and time.time() - last > MANAGED_GRACE_SECONDS):
+                print("[server] no commands within grace -> stopping", flush=True)
+                self.dj.stop_all(fade_ms=400)
+                break
+            time.sleep(0.15)
 
     def _dispatch(self, line):
+        # Returns False for QUIT (caller shuts down), True otherwise. No reply is
+        # sent — the plugin never reads one.
         parts = line.split(None, 1)
         verb = parts[0].upper()
         arg = parts[1].strip() if len(parts) > 1 else ""
         with self._lock:
-            if verb == "HELLO":
-                return f"OK Radio Big {VERSION}"
-            if verb == "PING":
-                return "PONG"
+            if verb in ("HELLO", "PING"):
+                return True  # heartbeat only
             if verb == "START":
                 self.dj.start_course(arg)
-                return f"OK started {arg}"
-            if verb == "FINISH":
+            elif verb == "FINISH":
                 self.dj.finish()
-                return "OK finish"
-            if verb == "MENU":
+            elif verb == "MENU":
                 self.dj.enter_menu()
-                return "OK menu"
-            if verb == "EVENT":
+            elif verb == "EVENT":
                 self.dj.react(arg.lower())
-                return f"OK event {arg}"
-            if verb == "QUIT":
-                return None
-            return f"ERR unknown verb {verb}"
+            elif verb == "QUIT":
+                return False
+            else:
+                print(f"[server] unknown verb {verb}", flush=True)
+            return True
 
 
 def main(argv=None):
@@ -131,12 +258,30 @@ def main(argv=None):
     ap.add_argument("--host", default=DEFAULT_HOST)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--assets", default=None,
+                    help="audio root (dj/ ssx3/ tricky/). Also read from "
+                         "RADIO_BIG_ASSETS; the CLI arg is preferred under wine, "
+                         "where the env var may not reach this child process. "
+                         "Consumed at import (see top of file); listed here so "
+                         "argparse accepts it.")
     ap.add_argument("--managed", action="store_true",
-                    help="exit once the game (client) disconnects — used when "
-                         "the plugin auto-launches and owns the player lifetime")
+                    help="exit once the game goes quiet — used when the plugin "
+                         "auto-launches and owns the player lifetime")
+    ap.add_argument("--gamepid", type=int, default=None,
+                    help="watch this process id (the game's) and exit the instant "
+                         "it dies. The reliable managed-quit signal under wine, "
+                         "where the game never delivers an in-app quit event.")
+    ap.add_argument("--cmdfile", default=None,
+                    help="tail this shared command file instead of binding a UDP "
+                         "socket. This is the transport the plugin uses (the socket "
+                         "path never delivered under wine); host/port are ignored.")
     args = ap.parse_args(argv)
-    RadioServer(args.host, args.port, args.seed,
-                managed=args.managed).serve_forever()
+    srv = RadioServer(args.host, args.port, args.seed, managed=args.managed,
+                      game_pid=args.gamepid)
+    if args.cmdfile:
+        srv.serve_file(args.cmdfile)
+    else:
+        srv.serve_forever()
     return 0
 
 
