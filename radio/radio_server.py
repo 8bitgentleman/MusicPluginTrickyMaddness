@@ -48,6 +48,17 @@ for _i, _a in enumerate(sys.argv):
     if _a == "--assets" and _i + 1 < len(sys.argv):
         os.environ.setdefault("RADIO_BIG_ASSETS", sys.argv[_i + 1])
 
+# Force UTF-8 (with replacement) on our log streams BEFORE anything prints. On
+# Windows the console/redirect default is cp1252, which raises UnicodeEncodeError
+# the instant a track title or asset path holds a char it can't map (⧸, an em-dash,
+# a curly quote) — and that exception crashes the whole player. dj_library logs at
+# import time, so this has to run before the DJBrain import below.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass  # already UTF-8, or a stream that can't be reconfigured — fine either way
+
 from dj_brain import DJBrain
 
 # Keep in sync with the plugin's BepInPlugin version in RadioBigPlugin/RadioBig.cs.
