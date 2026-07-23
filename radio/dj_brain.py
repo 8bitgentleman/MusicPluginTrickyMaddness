@@ -78,11 +78,10 @@ class DJBrain:
     ]
 
     def __init__(self, player=None, library=None, seed=None,
-                 segment_seconds=95, ssx3_bias=0.78, menu_banter_gap=16):
+                 ssx3_bias=0.78, menu_banter_gap=16):
         self.player = player or RadioPlayer()
         self.lib = library or Library()
         self.rng = random.Random(seed)  # seeded per process -> varies each launch
-        self.segment_seconds = segment_seconds
         self.ssx3_bias = ssx3_bias
         self.menu_banter_gap = menu_banter_gap
 
@@ -160,7 +159,7 @@ class DJBrain:
             self.player.play_music(song["path"])
             self._log(f"NOW PLAYING: {song['title']} "
                       f"[{song['source']}]" + ("" if song["artist_id"] else " (no intro)"))
-            self._hold(self.segment_seconds)   # next song only on long races
+            self._wait_for_track_end()   # let the song finish before the next intro
 
     def _do_outro(self):
         with self._voice_lock:                 # don't collide with a race clip
@@ -188,14 +187,15 @@ class DJBrain:
                     break
                 self._say(self._draw_menu_banter())
 
-    def _hold(self, seconds):
-        """Sleep up to `seconds`, waking early on stop or track end."""
-        step, waited = 0.15, 0.0
-        while waited < seconds and not self._stop.is_set():
-            if not self.player.music_busy():
-                return  # track finished -> start the next segment now
-            time.sleep(step)
-            waited += step
+    def _wait_for_track_end(self):
+        """Block until the current song finishes, waking early on stop.
+
+        Songs play to completion — a race ending fires finish(), which halts
+        this worker and rolls the outro, so there's no reason to cut a track
+        short mid-run (the old fixed segment cap chopped every song that ran
+        longer than it, which was every real track)."""
+        while self.player.music_busy() and not self._stop.is_set():
+            time.sleep(0.15)
 
     def _sleep_interruptible(self, seconds):
         """Sleep, returning True if a stop was requested mid-sleep."""
@@ -254,7 +254,7 @@ class DJBrain:
 # --- standalone dogfood: a compressed broadcast you can hear, no game ----
 def demo():
     # Compressed timings so the whole lifecycle plays out fast.
-    dj = DJBrain(segment_seconds=14, menu_banter_gap=8)
+    dj = DJBrain(menu_banter_gap=8)
     print("[demo] MENU: lobby loop + banter")
     dj.enter_menu()
     time.sleep(16)
