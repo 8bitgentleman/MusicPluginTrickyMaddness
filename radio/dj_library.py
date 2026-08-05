@@ -246,9 +246,26 @@ def _list_music(d):
     )
 
 
+ALL_SOURCES = ("ssx3", "tricky", "sxot")
+
+
 class Library:
-    """Everything the DJ brain needs to know about the assets on disk."""
-    def __init__(self):
+    """Everything the DJ brain needs to know about the assets on disk.
+
+    `sources` is the set of soundtracks the user left switched on (see the
+    plugin's [Sources] config section).  None means "everything installed".
+    Filtering happens HERE rather than in DJBrain because the brain already
+    builds its shuffle bags and renormalises its weights from whatever the
+    library actually handed it — so a source dropped here disappears cleanly
+    all the way through, with no second table to keep in sync.
+
+    The DJ voice pool is deliberately NOT filtered: Atomika is SSX 3's
+    announcer but he fronts the whole station, and muting him along with the
+    SSX 3 songs would turn "I'd rather not hear SSX 3's music" into "the radio
+    has no presenter".
+    """
+    def __init__(self, sources=None):
+        self.sources = None if sources is None else set(sources)
         self.clips = load_clips()  # category -> [paths]
 
         # MusicIntroductions split by artist.
@@ -288,6 +305,33 @@ class Library:
             num, title, artist = parse_song(p)
             self.songs.append(dict(path=p, num=num, title=title,
                                    artist_id=artist, source="sxot"))
+
+        if self.sources is not None:
+            dropped = sorted({s["source"] for s in self.songs} - self.sources)
+            self.songs = [s for s in self.songs if s["source"] in self.sources]
+            self.menu_tracks = [s for s in self.menu_tracks
+                                if s["source"] in self.sources]
+            if dropped:
+                print(f"[library] sources disabled by config: "
+                      f"{', '.join(dropped)}", flush=True)
+            unknown = sorted(self.sources - set(ALL_SOURCES))
+            if unknown:
+                # A typo'd source name would otherwise silently filter to
+                # nothing and read as "the radio is broken".
+                print(f"!! [library] --sources named {', '.join(unknown)}, which "
+                      f"is not a known soundtrack ({', '.join(ALL_SOURCES)}) — "
+                      f"check the plugin's [Sources] config", flush=True)
+            if not self.songs:
+                print("!! [library] every soundtrack is switched off — the DJ "
+                      "will talk but no music will play. Re-enable one under "
+                      "[Sources] in com.mtv.radiobig.cfg.", flush=True)
+            elif not self.menu_tracks:
+                # SSX 3's Hub Themes and Tricky's Menu track are the only lobby
+                # loops there are; with both off the menu is silent even though
+                # races still have music, which looks like a different bug.
+                print("!! [library] no menu/lobby music left (that comes from "
+                      "SSX 3's Hub Themes and Tricky's Menu track) — menus will "
+                      "be silent, races still play.", flush=True)
 
     def intros_for(self, song):
         """The artist-matched intro clips for a song, or [] if none."""

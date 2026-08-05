@@ -46,6 +46,10 @@ namespace RadioBigTM
         internal static ConfigEntry<int> serverPort;
         internal static ConfigEntry<bool> autoLaunchPlayer;
 
+        internal static ConfigEntry<bool> enableSsx3;
+        internal static ConfigEntry<bool> enableTricky;
+        internal static ConfigEntry<bool> enableOnTour;
+
         internal static string CurrentLevelName;
         internal static RadioClient Client;
         internal static Process PlayerProc;   // the bundled player, if we launched it
@@ -88,6 +92,17 @@ namespace RadioBigTM
             autoLaunchPlayer = Config.Bind("Server", "AutoLaunchPlayer", true,
                 "Launch the bundled Radio Big player automatically with the game. " +
                 "Turn off if you run the player yourself (run_radio.sh, dev).");
+
+            // Per-soundtrack switches. Turning one off removes its songs from the
+            // shuffle; the remaining soundtracks' shares are renormalised by the
+            // player, so the radio does not go quiet in proportion. DJ Atomika
+            // keeps presenting regardless of which games' music is on.
+            enableSsx3 = Config.Bind("Sources", "SSX3", true,
+                "Play the SSX 3 soundtrack.");
+            enableTricky = Config.Bind("Sources", "Tricky", true,
+                "Play the SSX Tricky soundtrack.");
+            enableOnTour = Config.Bind("Sources", "OnTour", true,
+                "Play the SSX On Tour soundtrack (only if its audio is installed).");
 
             // Transport = a shared command file (NOT a socket). The game's Unity
             // Mono under wine (CrossOver) never delivered our localhost datagrams to
@@ -195,6 +210,18 @@ namespace RadioBigTM
                 int gamePid = Process.GetCurrentProcess().Id;
                 string args = $"--managed --gamepid {gamePid} --cmdfile \"{Plugin.CmdFile}\"";
                 if (haveAssets) args += $" --assets \"{assets}\"";
+                // Passed by argv, not env: env vars do not reliably reach a
+                // wine-spawned child (same reason --assets is an arg). Always
+                // sent, even when everything is on, so the player's log states
+                // the effective set rather than leaving it to be inferred.
+                var srcs = new System.Collections.Generic.List<string>();
+                if (enableSsx3.Value) srcs.Add("ssx3");
+                if (enableTricky.Value) srcs.Add("tricky");
+                if (enableOnTour.Value) srcs.Add("sxot");
+                if (srcs.Count == 0)
+                    Log.LogWarning("[Sources] every soundtrack is switched off — " +
+                                   "the DJ will talk but no music will play.");
+                args += $" --sources \"{string.Join(",", srcs.ToArray())}\"";
                 Log.LogInfo(haveAssets
                     ? $"[Radio] assets -> {assets}"
                     : $"[Radio] WARNING: assets dir not found at {assets} — the player " +

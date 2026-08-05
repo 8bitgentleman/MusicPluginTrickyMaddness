@@ -60,6 +60,10 @@ for _stream in (sys.stdout, sys.stderr):
         pass  # already UTF-8, or a stream that can't be reconfigured — fine either way
 
 from dj_brain import DJBrain
+# Imported after the --assets/env fold above, for the same reason dj_brain is:
+# dj_library resolves its pool paths at IMPORT time, so an earlier import would
+# bind them before --assets had a chance to set RADIO_BIG_ASSETS.
+from dj_library import Library
 
 # Keep in sync with the plugin's BepInPlugin version in RadioBigPlugin/RadioBig.cs.
 # Purely cosmetic now (UDP: we send no reply) — the plugin attr is the version a
@@ -117,9 +121,9 @@ def _pid_alive(pid):
 
 class RadioServer:
     def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT, seed=None,
-                 managed=False, game_pid=None):
+                 managed=False, game_pid=None, sources=None):
         self.host, self.port = host, port
-        self.dj = DJBrain(seed=seed)
+        self.dj = DJBrain(seed=seed, library=Library(sources=sources))
         self.game_pid = game_pid  # watch this; exit when it dies (managed)
         self._lock = threading.Lock()  # serialise command handling
         # Managed = the plugin auto-launched us and owns our lifetime: exit once
@@ -275,6 +279,13 @@ def main(argv=None):
                          "where the env var may not reach this child process. "
                          "Consumed at import (see top of file); listed here so "
                          "argparse accepts it.")
+    ap.add_argument("--sources", default=None,
+                    help="comma-separated soundtracks to play: any of "
+                         "ssx3,tricky,sxot. Omitted means all installed. Set "
+                         "from the plugin's [Sources] config; passed by ARGV "
+                         "rather than an env var for the same reason --assets "
+                         "is (env does not reliably reach a wine-spawned "
+                         "child).")
     ap.add_argument("--managed", action="store_true",
                     help="exit once the game goes quiet — used when the plugin "
                          "auto-launches and owns the player lifetime")
@@ -287,8 +298,13 @@ def main(argv=None):
                          "socket. This is the transport the plugin uses (the socket "
                          "path never delivered under wine); host/port are ignored.")
     args = ap.parse_args(argv)
+    sources = None
+    if args.sources is not None:
+        # An explicit empty string means "all off" -- honour it (the library
+        # says so loudly) rather than reading it back as "unset".
+        sources = [t.strip() for t in args.sources.split(",") if t.strip()]
     srv = RadioServer(args.host, args.port, args.seed, managed=args.managed,
-                      game_pid=args.gamepid)
+                      game_pid=args.gamepid, sources=sources)
     if args.cmdfile:
         srv.serve_file(args.cmdfile)
     else:
