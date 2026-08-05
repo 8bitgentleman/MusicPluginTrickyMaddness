@@ -1,11 +1,16 @@
 # Radio Big — a live DJ radio for Tricky Madness
 
-**Version 1.2.0.** Report bugs with the version line from `BepInEx/LogOutput.log`
-(`Loading [Radio Big 1.2.0]`) so it's clear which build you're on.
+**Version 1.2.1.** Report bugs with the version line from `BepInEx/LogOutput.log`
+(`Loading [Radio Big 1.2.1]`) so it's clear which build you're on.
 
 Turns the game's music slot into **Radio Big**, the SSX3 station: Atomika
 introduces each track by name, the lobby runs mountain news / rider gossip
 between races, and it's paced and shuffled so no two sessions sound alike.
+
+**Fixed in 1.2.1:** the DJ no longer talks over your race every ~30 seconds.
+Lobby chatter was leaking into races — leaving the menu didn't reliably shut the
+lobby down, so it kept splicing in banter for the rest of the session (and each
+new race could add another). Races are back to intro-then-music.
 
 **New in 1.2.0:** the **SSX On Tour** soundtrack joins SSX 3 and SSX Tricky, you
 can **switch any of the three off** (see *Choosing which soundtracks play*), and

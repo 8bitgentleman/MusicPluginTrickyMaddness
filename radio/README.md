@@ -68,6 +68,40 @@ deliberately **not** filtered — Atomika fronts the whole station.
 `./freeze_windows.sh`) — the plugin launches the *frozen* player, so a source-only
 change tests nothing that ships.
 
+## Worker lifecycle — the "DJ talks over the race" trap
+
+Only one broadcast may be live at a time, and `DJBrain` enforces that with a
+worker thread plus a stop flag. Three rules, all of which shipped broken in 1.2.0
+and produced the same audible symptom (lobby banter spliced over a race roughly
+every `menu_banter_gap` seconds, forever):
+
+- ⚠️ **Each worker owns its own `threading.Event`, handed to it as an argument,
+  and a halted worker's Event is never cleared.** The 1.2.0 code kept one shared
+  `self._stop` that `_begin` cleared before starting the next worker — which
+  un-stopped any worker that had outlived the join, resurrecting it permanently.
+  Never read `self._stop` from inside a broadcast; read the `stop` argument.
+- ⚠️ **Anything a worker blocks in must take that Event.** `RadioPlayer.say()`
+  blocks for a whole 12–20 s clip, an order of magnitude past `_halt_worker`'s
+  2 s join, so without an interrupt the join always timed out and the halt was a
+  no-op. The one deliberate exception is `_do_outro`'s sign-off, which passes no
+  Event so a new broadcast can't cut Atomika off mid-goodbye.
+- ⚠️ **`_say` waits for the voice lock in stop-aware slices and re-checks after
+  acquiring it.** Because the sign-off above is uninterruptible, a worker can sit
+  queued on that lock across its own halt; a plain `with self._voice_lock` wakes
+  up afterwards and plays one stale line straight over the race.
+
+Both failures have a deterministic regression test (fake player, compressed
+timings, no audio, exit 1 on repro):
+
+```sh
+python3 tests/test_worker_lifecycle_zombie.py
+python3 tests/test_worker_lifecycle_outro_lock.py
+```
+
+The outro-lock one only reproduces in a narrow window, so its `time.sleep`
+values are load-bearing — if you retune `menu_banter_gap` semantics, re-check it
+still fails against the old code before trusting it to pass against the new.
+
 ## Dogfood without the game
 
 ```sh

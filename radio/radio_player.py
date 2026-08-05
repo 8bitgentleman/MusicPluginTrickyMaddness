@@ -59,17 +59,29 @@ class RadioPlayer:
             time.sleep(0.02)
 
     # --- DJ voice, with ducking -----------------------------------------
-    def say(self, path, tail=0.25, restore=True):
+    def say(self, path, tail=0.25, restore=True, stop=None):
         """Duck the bed, play a voice clip to completion, then un-duck.
         `tail` = extra seconds of ducking after the voice ends (breathing room).
         `restore=False` leaves the bed ducked (for a sign-off that fades out
-        right after — avoids a pointless swell before the fade)."""
+        right after — avoids a pointless swell before the fade).
+
+        ⚠️ `stop` (a threading.Event) makes the clip INTERRUPTIBLE, and a caller
+        that owns a worker thread must pass one. Without it this blocks for the
+        clip's full 12-20s, which is far longer than DJBrain's join timeout — so
+        a broadcast being torn down could not actually be torn down, and the
+        worker outlived the halt that was supposed to end it. Callers that are
+        NOT a worker (the sign-off in _do_outro) deliberately pass nothing, so a
+        new broadcast starting up can't cut Atomika off mid-goodbye."""
         snd = pygame.mixer.Sound(path)
         self._ramp_music(self.music_ducked, self.duck_ramp)
         self._voice_ch.play(snd)
         while self._voice_ch.get_busy():
+            if stop is not None and stop.is_set():
+                self._voice_ch.stop()
+                break
             time.sleep(0.03)
-        time.sleep(tail)
+        else:
+            time.sleep(tail)
         if restore:
             self._music_target = self.music_full
             self._ramp_music(self.music_full, self.duck_ramp)
