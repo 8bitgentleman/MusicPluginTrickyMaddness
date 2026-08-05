@@ -68,34 +68,47 @@ deliberately **not** filtered — Atomika fronts the whole station.
 `./freeze_windows.sh`) — the plugin launches the *frozen* player, so a source-only
 change tests nothing that ships.
 
-## Worker lifecycle — the "DJ talks over the race" trap
+## Worker lifecycle — a clip always finishes, a broadcast still stops
 
 Only one broadcast may be live at a time, and `DJBrain` enforces that with a
-worker thread plus a stop flag. Three rules, all of which shipped broken in 1.2.0
-and produced the same audible symptom (lobby banter spliced over a race roughly
-every `menu_banter_gap` seconds, forever):
+worker thread plus a stop flag. The design constraint that makes it awkward:
+
+⚠️ **A voice clip can never be cut short.** Atomika finishing his sentence and
+handing over to the next segment is what makes this read as a radio station
+rather than a sound-effect player, so dropping into a course mid-line lets the
+line land first, then the race intro follows it. There is deliberately no stop
+flag inside `RadioPlayer.say()` — adding one is a *feel* regression even though
+it looks like a tidy shutdown.
+
+So a halted worker keeps talking past its own halt, and the shutdown has to be
+correct anyway. Three rules do that. All three shipped broken in 1.2.0 with the
+same audible symptom: lobby banter spliced over a race every `menu_banter_gap`
+seconds, forever.
 
 - ⚠️ **Each worker owns its own `threading.Event`, handed to it as an argument,
   and a halted worker's Event is never cleared.** The 1.2.0 code kept one shared
   `self._stop` that `_begin` cleared before starting the next worker — which
-  un-stopped any worker that had outlived the join, resurrecting it permanently.
+  un-stopped any worker still finishing a clip, resurrecting it permanently.
   Never read `self._stop` from inside a broadcast; read the `stop` argument.
-- ⚠️ **Anything a worker blocks in must take that Event.** `RadioPlayer.say()`
-  blocks for a whole 12–20 s clip, an order of magnitude past `_halt_worker`'s
-  2 s join, so without an interrupt the join always timed out and the halt was a
-  no-op. The one deliberate exception is `_do_outro`'s sign-off, which passes no
-  Event so a new broadcast can't cut Atomika off mid-goodbye.
-- ⚠️ **`_say` waits for the voice lock in stop-aware slices and re-checks after
-  acquiring it.** Because the sign-off above is uninterruptible, a worker can sit
-  queued on that lock across its own halt; a plain `with self._voice_lock` wakes
+- ⚠️ **`_halt_worker` does not wait for the worker to finish, and correctness
+  must not depend on its join.** The join is a 0.25 s courtesy reap for a worker
+  that is merely sleeping — a clip outlasts it by two orders of magnitude, and
+  `_begin` runs on the IPC thread, so a join long enough to actually cover a clip
+  would stall the race start instead.
+- ⚠️ **`_say` is the only place a broadcast is really stopped, and it checks
+  twice** — while waiting for the voice lock, and again after acquiring it. Both
+  matter: a worker can sit queued on that lock across its own halt (the clip
+  ahead of it is playing out in full), and a plain `with self._voice_lock` wakes
   up afterwards and plays one stale line straight over the race.
 
-Both failures have a deterministic regression test (fake player, compressed
-timings, no audio, exit 1 on repro):
+The handover *and* the shutdown have deterministic regression tests (fake player,
+compressed timings, no audio, exit 1 on repro). Run all three — they constrain
+each other, and a "fix" for one that breaks another is not a fix:
 
 ```sh
-python3 tests/test_worker_lifecycle_zombie.py
-python3 tests/test_worker_lifecycle_outro_lock.py
+python3 tests/test_voice_handover.py               # the line finishes, THEN the intro
+python3 tests/test_worker_lifecycle_zombie.py      # ...and nothing new starts after
+python3 tests/test_worker_lifecycle_outro_lock.py  # ...including from the lock queue
 ```
 
 The outro-lock one only reproduces in a narrow window, so its `time.sleep`

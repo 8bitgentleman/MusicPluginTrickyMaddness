@@ -59,29 +59,25 @@ class RadioPlayer:
             time.sleep(0.02)
 
     # --- DJ voice, with ducking -----------------------------------------
-    def say(self, path, tail=0.25, restore=True, stop=None):
+    def say(self, path, tail=0.25, restore=True):
         """Duck the bed, play a voice clip to completion, then un-duck.
         `tail` = extra seconds of ducking after the voice ends (breathing room).
         `restore=False` leaves the bed ducked (for a sign-off that fades out
         right after — avoids a pointless swell before the fade).
 
-        ⚠️ `stop` (a threading.Event) makes the clip INTERRUPTIBLE, and a caller
-        that owns a worker thread must pass one. Without it this blocks for the
-        clip's full 12-20s, which is far longer than DJBrain's join timeout — so
-        a broadcast being torn down could not actually be torn down, and the
-        worker outlived the halt that was supposed to end it. Callers that are
-        NOT a worker (the sign-off in _do_outro) deliberately pass nothing, so a
-        new broadcast starting up can't cut Atomika off mid-goodbye."""
+        ⚠️ A clip ALWAYS plays to the end — there is deliberately no way to cut
+        one short. Atomika finishing his sentence and handing over to the next
+        segment is the thing that makes this read as a radio station rather than
+        a sound-effect player, so dropping into a course mid-line lets the line
+        land first. DJBrain's worker lifecycle is built around that (it does not
+        rely on interrupting a clip to shut a broadcast down); see its _begin
+        and _say if you're tempted to add a stop flag here."""
         snd = pygame.mixer.Sound(path)
         self._ramp_music(self.music_ducked, self.duck_ramp)
         self._voice_ch.play(snd)
         while self._voice_ch.get_busy():
-            if stop is not None and stop.is_set():
-                self._voice_ch.stop()
-                break
             time.sleep(0.03)
-        else:
-            time.sleep(tail)
+        time.sleep(tail)
         if restore:
             self._music_target = self.music_full
             self._ramp_music(self.music_full, self.duck_ramp)

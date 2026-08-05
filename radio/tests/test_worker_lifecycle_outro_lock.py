@@ -27,15 +27,10 @@ class FakePlayer:
     def music_busy(self):
         return True
 
-    def say(self, path, tail=0.0, restore=True, stop=None):
+    def say(self, path, tail=0.0, restore=True):
         with self.lock:
             self.said.append((time.time(), threading.current_thread().name, path))
-        waited = 0.0
-        while waited < SAY_SECS:
-            if stop is not None and stop.is_set():
-                return
-            time.sleep(0.02)
-            waited += 0.02
+        time.sleep(SAY_SECS)
 
     def stop(self, fade_ms=600):
         pass

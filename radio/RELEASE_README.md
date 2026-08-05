@@ -10,7 +10,9 @@ between races, and it's paced and shuffled so no two sessions sound alike.
 **Fixed in 1.2.1:** the DJ no longer talks over your race every ~30 seconds.
 Lobby chatter was leaking into races — leaving the menu didn't reliably shut the
 lobby down, so it kept splicing in banter for the rest of the session (and each
-new race could add another). Races are back to intro-then-music.
+new race could add another). Races are back to intro-then-music. If Atomika is
+mid-sentence when you drop into a course he still finishes the line and *then*
+hands over to the track intro, the same as before — that part was never the bug.
 
 **New in 1.2.0:** the **SSX On Tour** soundtrack joins SSX 3 and SSX Tricky, you
 can **switch any of the three off** (see *Choosing which soundtracks play*), and

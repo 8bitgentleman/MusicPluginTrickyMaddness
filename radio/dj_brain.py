@@ -170,8 +170,8 @@ class DJBrain:
 
         ⚠️ Each worker gets its OWN stop Event, passed in as an argument, and a
         halted worker's Event is never cleared again. Do not go back to one
-        shared `self._stop` that `_begin` clears: a worker blocked in a 12-20s
-        voice clip outlives the 2s join, so the clear un-stopped a thread that
+        shared `self._stop` that `_begin` clears: a worker mid-clip outlives the
+        halt by design (see _halt_worker), so the clear un-stopped a thread that
         was still running, and the resurrected menu worker went on splicing
         banter every `menu_banter_gap` seconds OVER the race for the rest of the
         session. That is the "DJ talks over every song" bug, and every startable
@@ -183,15 +183,22 @@ class DJBrain:
         self._thread.start()
 
     def _halt_worker(self):
-        # Set FIRST and never clear: a worker that outlives the join below still
-        # sees its own flag set forever and exits at its next check, instead of
-        # being handed a cleared flag by the next _begin.
+        """Ask the current broadcast to end. Does NOT wait for it to.
+
+        ⚠️ A halted worker that is mid-clip goes on talking until the clip ends
+        — on purpose. Atomika finishing his sentence before the race intro takes
+        over is the station feel, and the handover is clean because the incoming
+        worker's first _say has to take the voice lock this one still holds.
+
+        Correctness therefore rests entirely on the flag being per-worker and
+        never cleared, NOT on the join: whenever the lingering worker next looks
+        up, its own Event is set and it exits. The join is a short courtesy reap
+        for workers that are merely sleeping, and _begin runs on the IPC thread,
+        so it must not sit here for the length of a clip."""
         self._stop.set()
         t = self._thread
         if t and t.is_alive():
-            # The worker's say() is interruptible via the same Event, so this
-            # normally returns in well under a tenth of the timeout.
-            t.join(timeout=2.0)
+            t.join(timeout=0.25)
         self._thread = None
 
     # --- race: intro -> song, looping for long runs ----------------------
@@ -304,32 +311,35 @@ class DJBrain:
 
     # --- voice with a single-speaker lock --------------------------------
     def _say(self, path, stop=None, blocking=True):
-        """Speak a clip. `stop` is the CALLING WORKER's own Event — pass it or
-        the clip becomes an uninterruptible 12-20s block that outlives the halt
-        (see _begin)."""
+        """Speak a clip, waiting for whoever is talking to finish first.
+
+        ⚠️ This is where a halted broadcast is actually stopped, and `stop` (the
+        CALLING WORKER's own Event) is what does it — clips themselves always run
+        to the end, so the only safe place to drop a line is BEFORE it starts.
+        Two checks, and both are load-bearing:
+
+          * while waiting for the lock — a worker can sit queued here across its
+            own halt, because the clip ahead of it plays out in full;
+          * again after acquiring it — by then the halt may have landed and a
+            race started, and a plain `with self._voice_lock` would wake up and
+            play one stale banter line straight over it."""
         if not path:
             return
         if blocking:
-            # ⚠️ Wait for the lock in stop-aware slices, and re-check AFTER
-            # acquiring it. The sign-off in _do_outro is deliberately NOT
-            # interruptible, so it can hold this lock for a full clip — long
-            # enough for the worker queued behind it to be halted and a race to
-            # start meanwhile. A plain `with self._voice_lock` would then wake
-            # up and play one stale banter line straight over the race.
             while not self._voice_lock.acquire(timeout=0.1):
                 if stop is not None and stop.is_set():
                     return
             try:
                 if stop is not None and stop.is_set():
                     return
-                self.player.say(path, stop=stop)
+                self.player.say(path)
             finally:
                 self._voice_lock.release()
         else:
             # Reactive: skip rather than queue if the DJ is already talking.
             if self._voice_lock.acquire(blocking=False):
                 try:
-                    self.player.say(path, stop=stop)
+                    self.player.say(path)
                 finally:
                     self._voice_lock.release()
 
