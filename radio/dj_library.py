@@ -4,13 +4,20 @@
 Two pools on disk:
   * DJ voice clips -> RADIO dir, categorised by a filename prefix
     (MusicIntroductions, BigMountainLocalNews, RiderBackstories, ...).
-  * Music tracks   -> the SSX 3 and SSX Tricky soundtrack rips.
+  * Music tracks   -> the SSX 3, SSX Tricky and SSX On Tour soundtrack rips.
 
 The one bit of "smarter than random": ~28 of the 35 SSX3 songs have a dedicated
 Atomika intro that names the artist ("...up next, Placebo"). We parse the artist
 out of both filenames and match them so the DJ can actually introduce the track
 that's about to play. Tricky tracks are instrumental and predate this DJ, so they
 get no artist intro (generic music-bed intros only).
+
+On Tour has no DJ of its own — it dropped Atomika's station for a plain shuffle —
+so its 41 licensed tracks ride under the generic intros the same way Tricky's do.
+One match falls out for free: Queens Of The Stone Age are on BOTH soundtracks, so
+On Tour's "Medication" resolves to the real Atomika intro naming them. That is a
+true match rather than a collision to defend against, and it is why On Tour goes
+through the same artist parse as SSX3 instead of being pinned to artist_id=None.
 
 Pure stdlib, no third-party deps — this module is import-safe with no audio.
 """
@@ -23,17 +30,24 @@ MUSIC_EXTS = (".mp3", ".ogg", ".wav", ".m4a")
 
 
 # --- asset locations ------------------------------------------------------
-# Three audio pools: the Radio Big DJ voice clips, and the two soundtracks.
+# Four audio pools: the Radio Big DJ voice clips, and the three soundtracks.
 # Resolved at import so the same code runs from source (the author's machine)
 # AND as a frozen, shipped bundle. Precedence:
-#   1. RADIO_BIG_ASSETS  -> <dir>/{dj,ssx3,tricky}   (the shipped layout; the
-#      plugin sets this when it auto-launches the frozen player)
-#   2. per-pool overrides RADIO_BIG_{DJ,SSX3,TRICKY}
+#   1. RADIO_BIG_ASSETS  -> <dir>/{dj,ssx3,tricky,sxot}   (the shipped layout;
+#      the plugin sets this when it auto-launches the frozen player)
+#   2. per-pool overrides RADIO_BIG_{DJ,SSX3,TRICKY,SXOT}
 #   3. an `assets/` folder beside a PyInstaller-frozen executable
 #   4. the original dev paths (running from source, unfrozen)
+#
+# ⚠️ A missing pool is NOT an error — On Tour ships as an optional extra, and an
+# install without it must degrade to the other two rather than break. The bags in
+# dj_brain renormalise over whichever sources actually loaded.
 _DEV_DJ = "/Users/mtvogel/Downloads/claude_scratch/Radio_Big/Radio_Big_Sections"
 _DEV_SSX3 = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX 3 [Soundtrack⧸Gamerip]"
 _DEV_TRICKY = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX Tricky (Complete Soundtrack OST)"
+# On Tour comes off the user's own UMD via ssx/audio_rip_music.py in the
+# tricky_mods repo, so its dev path is that ripper's default output.
+_DEV_SXOT = os.path.expanduser("~/Downloads/SSX_Audio/ssx_on_tour/music")
 
 
 def _resolve_assets():
@@ -61,10 +75,12 @@ def _resolve_assets():
         os.path.join(base, "ssx3") if base else _DEV_SSX3)
     tricky = os.environ.get("RADIO_BIG_TRICKY") or (
         os.path.join(base, "tricky") if base else _DEV_TRICKY)
-    return dj, ssx3, tricky
+    sxot = os.environ.get("RADIO_BIG_SXOT") or (
+        os.path.join(base, "sxot") if base else _DEV_SXOT)
+    return dj, ssx3, tricky, sxot
 
 
-RADIO, SSX3, TRICKY = _resolve_assets()
+RADIO, SSX3, TRICKY, SXOT = _resolve_assets()
 
 
 def _log_asset_diag():
@@ -75,9 +91,14 @@ def _log_asset_diag():
     src = os.environ.get("RADIO_BIG_ASSETS") or ("(frozen search)"
           if getattr(sys, "frozen", False) else "(dev paths)")
     print(f"[library] RADIO_BIG_ASSETS={src}", flush=True)
-    for label, d in (("dj", RADIO), ("ssx3", SSX3), ("tricky", TRICKY)):
+    # `optional` marks pools whose absence is a legitimate install, so a missing
+    # dir there reads as "not installed" instead of sending someone hunting for
+    # a broken assets path.
+    for label, d, optional in (("dj", RADIO, False), ("ssx3", SSX3, False),
+                               ("tricky", TRICKY, False), ("sxot", SXOT, True)):
         n = len(glob.glob(os.path.join(d, "*.mp3"))) if os.path.isdir(d) else -1
-        state = f"{n} mp3" if n >= 0 else "MISSING DIR"
+        state = f"{n} mp3" if n >= 0 else ("not installed" if optional
+                                           else "MISSING DIR")
         print(f"[library]   {label:6} -> {d}  [{state}]", flush=True)
 
 
@@ -261,6 +282,12 @@ class Library:
                 continue
             self.songs.append(dict(path=p, num=num, title=title,
                                    artist_id=None, source="tricky"))
+        # On Tour: all 41 are licensed race tracks — the game has no lobby loop
+        # of its own to feed menu_tracks, so nothing is split off here.
+        for p in _list_music(SXOT):
+            num, title, artist = parse_song(p)
+            self.songs.append(dict(path=p, num=num, title=title,
+                                   artist_id=artist, source="sxot"))
 
     def intros_for(self, song):
         """The artist-matched intro clips for a song, or [] if none."""
@@ -277,10 +304,13 @@ if __name__ == "__main__":
           f"{len(lib.generic_intros)} generic")
     print(f"\nSongs: {len(lib.songs)} "
           f"({sum(1 for s in lib.songs if s['source']=='ssx3')} SSX3 + "
-          f"{sum(1 for s in lib.songs if s['source']=='tricky')} Tricky)")
+          f"{sum(1 for s in lib.songs if s['source']=='tricky')} Tricky + "
+          f"{sum(1 for s in lib.songs if s['source']=='sxot')} On Tour)")
     matched = [s for s in lib.songs if lib.intros_for(s)]
     print(f"Songs with an artist-matched intro: {len(matched)}\n")
     for s in lib.songs:
         n = len(lib.intros_for(s))
-        tag = f"{n} intros" if n else ("(instrumental)" if s['source'] == 'tricky' else "NO INTRO")
+        tag = (f"{n} intros" if n else
+               "(instrumental)" if s['source'] == 'tricky' else
+               "(no On Tour DJ)" if s['source'] == 'sxot' else "NO INTRO")
         print(f"  [{s['source']:6}] {str(s['title'])[:38]:38}  {tag}")

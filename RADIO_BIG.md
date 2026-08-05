@@ -83,12 +83,44 @@ PyInstaller **can't cross-compile**, so each OS's binary is frozen on that OS �
 the wrinkle that the **Windows `.exe` is frozen from macOS under CrossOver's Wine**
 (`radio/freeze_windows.sh`), no Windows box required. Build details: `radio/BUILD.md`.
 
-> **The audio never goes in git.** The DJ voice + the SSX3/Tricky soundtrack rips are
-> ~1 GB and are *not our content*. `package.sh` copies them in from local paths at
+> **The audio never goes in git.** The DJ voice + the soundtrack rips are ~1.2 GB
+> and are *not our content*. `package.sh` copies them in from local paths at
 > release time; `.gitignore` excludes `radio/_release/`, `radio/dist/`,
 > `radio/dist-windows/`, and the built DLLs. Only **source, scripts, and docs** are
 > tracked. If you add an asset step, keep it pointing at out-of-tree paths — a
 > committed mp3 is a licensing problem, not just a big-file problem.
+
+## The soundtrack pools
+
+Four asset dirs under `assets/`: `dj` (Atomika's voice clips) and three
+soundtracks — `ssx3`, `tricky`, `sxot` (SSX On Tour).
+
+| Pool | Tracks | Artist-matched intros? |
+|---|---|---|
+| `ssx3` | 35 race + 3 hub loops | yes — ~28 have a dedicated Atomika intro naming the artist |
+| `tricky` | ~21 + a menu loop | no — instrumental, and they predate this DJ |
+| `sxot` | 41 | no — On Tour dropped Atomika's station for a plain shuffle. One exception: **Queens Of The Stone Age are on both soundtracks**, so On Tour's *Medication* resolves to the real intro naming them |
+
+⚠️ **`sxot` is optional and must stay that way.** It only exists if you own the
+PSP UMD and ran the ripper (`tricky_mods: ssx/audio_rip_music.py`). A missing
+pool reads as `not installed` in the startup diagnostic rather than
+`MISSING DIR`, `package.sh` skips it with a warning instead of failing its
+prereq check, and `DJBrain._next_song` **renormalises `SOURCE_WEIGHTS` over the
+pools that actually loaded** — so a two-soundtrack install plays at the old
+ratio rather than going quiet 15% of the time.
+
+⚠️ **Adding a fourth soundtrack is two edits.** A `_list_music()` loop in
+`dj_library.Library.__init__` tagged with a new `source=`, *and* an entry in
+`DJBrain.SOURCE_WEIGHTS`. Forgetting the weight no longer loses the pool — the
+bags are built from **what actually loaded**, so an unweighted source plays at
+`DJBrain.UNWEIGHTED_SHARE` and says so on stdout. (It used to be built from the
+weight table, which meant the songs loaded, counted, printed in the library dump
+and could never be drawn.)
+
+⚠️ **Filenames are the metadata.** `parse_song()` reads track number, title and
+artist out of `<NN> - <Title> (<Artist>).mp3`; the artist is the **last**
+parenthetical. Nothing reads ID3 tags. Rename a pool and you silently lose its
+artist matching.
 
 ## Where the pieces are
 

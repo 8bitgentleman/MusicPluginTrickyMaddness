@@ -77,21 +77,47 @@ class DJBrain:
         ("AggressionDuringEvents", 2),
     ]
 
+    # How often each soundtrack comes up. SSX3 leads because it is the only one
+    # Atomika can name the artist of — every SSX3 draw is a shot at the
+    # artist-matched intro, the other two can only ever land a generic one.
+    # ⚠️ Feel numbers, not measured. The pre-On-Tour split was 0.78/0.22 and the
+    # new source is carved out of SSX3's share rather than Tricky's, so Tricky
+    # doesn't get quieter than it already was.
+    SOURCE_WEIGHTS = {"ssx3": 0.66, "tricky": 0.19, "sxot": 0.15}
+    # What an installed-but-unweighted soundtrack plays at until someone gives
+    # it a real share — enough to be obviously present, not enough to take over.
+    UNWEIGHTED_SHARE = 0.10
+
     def __init__(self, player=None, library=None, seed=None,
-                 ssx3_bias=0.78, menu_banter_gap=16):
+                 source_weights=None, menu_banter_gap=16):
         self.player = player or RadioPlayer()
         self.lib = library or Library()
         self.rng = random.Random(seed)  # seeded per process -> varies each launch
-        self.ssx3_bias = ssx3_bias
+        # `is None`, not `or`: an explicit {} means "no sources", and falling
+        # back to the class defaults there would silently ignore the caller.
+        self.source_weights = dict(self.SOURCE_WEIGHTS if source_weights is None
+                                   else source_weights)
         self.menu_banter_gap = menu_banter_gap
 
         # No-repeat bags per clip category + per song source.
         self._bags = {cat: ShuffleBag(paths, self.rng)
                       for cat, paths in self.lib.clips.items()}
-        ssx3 = [s for s in self.lib.songs if s["source"] == "ssx3"]
-        tricky = [s for s in self.lib.songs if s["source"] == "tricky"]
-        self._ssx3_bag = ShuffleBag(ssx3, self.rng)
-        self._tricky_bag = ShuffleBag(tricky, self.rng)
+        # ⚠️ Driven by WHAT LOADED, not by the weight table. A soundtrack that
+        # isn't installed simply has no bag and _next_song renormalises over the
+        # rest; a soundtrack that IS installed but was never given a weight would
+        # otherwise load, count, print in the library dump — and be undrawable
+        # forever, because the bags were built from the weights. That is the
+        # exact "quietly diminished result" this project's rules forbid, so it
+        # gets a default weight and a loud line instead.
+        self._song_bags = {}
+        for src in sorted({s["source"] for s in self.lib.songs}):
+            if src not in self.source_weights:
+                self.source_weights[src] = self.UNWEIGHTED_SHARE
+                self._log(f"!! soundtrack '{src}' has no DJBrain.SOURCE_WEIGHTS "
+                          f"entry — playing it at {self.UNWEIGHTED_SHARE}; add "
+                          f"one to set its real share")
+            self._song_bags[src] = ShuffleBag(
+                [s for s in self.lib.songs if s["source"] == src], self.rng)
         self._menu_bag = ShuffleBag(self.lib.menu_tracks, self.rng)
         # Per-song intro bags so a track's 3 intros rotate instead of repeating.
         self._intro_bags = {a: ShuffleBag(paths, self.rng)
@@ -209,10 +235,33 @@ class DJBrain:
 
     # --- selection helpers ----------------------------------------------
     def _next_song(self):
-        want_ssx3 = self.rng.random() < self.ssx3_bias
-        first = self._ssx3_bag if want_ssx3 else self._tricky_bag
-        second = self._tricky_bag if want_ssx3 else self._ssx3_bag
-        return first.draw() or second.draw()
+        """Weighted draw across the installed soundtracks.
+
+        Weights are renormalised over the bags that exist, so an install missing
+        On Tour plays the other two at their old ratio rather than silently
+        going quiet 15% of the time."""
+        if not self._song_bags:
+            return None
+        # Drop non-positive weights rather than handing them to rng.choices,
+        # which raises on a total of zero — and would happily let a negative
+        # weight cancel a positive one out of the running.
+        srcs = [s for s in self._song_bags if self.source_weights.get(s, 0) > 0]
+        weights = [self.source_weights[s] for s in srcs]
+        if not srcs:                  # every installed source weighted <= 0
+            srcs = list(self._song_bags)
+            weights = [1.0] * len(srcs)
+        src = self.rng.choices(srcs, weights=weights, k=1)[0]
+        song = self._song_bags[src].draw()
+        if song:
+            return song
+        # A bag can only come back empty if its pool was empty, which the
+        # constructor already filters out -- but fall through rather than
+        # returning None and dropping a broadcast on the floor.
+        for other in self._song_bags:
+            song = self._song_bags[other].draw()
+            if song:
+                return song
+        return None
 
     def _intro_for(self, song):
         a = song.get("artist_id")
