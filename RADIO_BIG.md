@@ -98,7 +98,7 @@ soundtracks — `ssx3`, `tricky`, `sxot` (SSX On Tour).
 | Pool | Tracks | Artist-matched intros? |
 |---|---|---|
 | `ssx3` | 35 race + 3 hub loops | yes — ~28 have a dedicated Atomika intro naming the artist |
-| `tricky` | ~21 + a menu loop | no — instrumental, and they predate this DJ |
+| `tricky` | 21 + a menu loop + 2 alternate recordings | no — instrumental, and they predate this DJ |
 | `sxot` | 41 | no — On Tour dropped Atomika's station for a plain shuffle. One exception: **Queens Of The Stone Age are on both soundtracks**, so On Tour's *Medication* resolves to the real intro naming them |
 
 ⚠️ **`sxot` is optional and must stay that way.** It only exists if you own the
@@ -108,6 +108,21 @@ pool reads as `not installed` in the startup diagnostic rather than
 prereq check, and `DJBrain._next_song` **renormalises `SOURCE_WEIGHTS` over the
 pools that actually loaded** — so a two-soundtrack install plays at the old
 ratio rather than going quiet 15% of the time.
+
+⚠️ **`ssx3` and `tricky` are disc rips, and their FILENAMES are load-bearing.**
+Since 1.2.0 both pools come off the PS2 discs (`tricky_mods:
+ssx/music_build_pool.py`), but they ship under the *web rips'* titles, because
+`parse_song` / `INTRO_ARTISTS` recover title and artist from the filename — that
+is how Atomika knows whose track he is introducing. Deploying the raw disc rips,
+which are named by artist slug (`fspoon.mp3`), silently kills every
+artist-matched intro with nothing logged. The rename tables are
+`tricky_mods: ssx/{ssx3,tricky}_song_names.tsv`; the regression check is that
+artist-matched intros stay at **32**.
+
+⚠️ **A user can switch any pool off** — plugin config `[Sources]` → player
+`--sources`. Filtering lives in `Library.__init__` so the brain's bags and weight
+renormalisation (above) absorb it with no second table; the `dj` pool is never
+filtered. Details in `radio/README.md`.
 
 ⚠️ **Adding a fourth soundtrack is two edits.** A `_list_music()` loop in
 `dj_library.Library.__init__` tagged with a new `source=`, *and* an entry in

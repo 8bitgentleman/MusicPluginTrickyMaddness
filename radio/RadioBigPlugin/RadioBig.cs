@@ -33,7 +33,7 @@ namespace RadioBigTM
     // the load-bearing copy — BepInEx logs it on plugin load, so it's what a bug
     // reporter's LogOutput.log shows. (The player's copy only appears in the HELLO
     // reply, which this plugin never reads, so it's cosmetic — but sync it anyway.)
-    [BepInPlugin("com.mtv.radiobig", "Radio Big", "1.1.1")]
+    [BepInPlugin("com.mtv.radiobig", "Radio Big", "1.2.0")]
     public class Plugin : BaseUnityPlugin
     {
         internal static Plugin Instance;

@@ -68,7 +68,7 @@ from dj_library import Library
 # Keep in sync with the plugin's BepInPlugin version in RadioBigPlugin/RadioBig.cs.
 # Purely cosmetic now (UDP: we send no reply) — the plugin attr is the version a
 # bug reporter's log actually shows. Sync it anyway.
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 48757  # arbitrary high port; must match the plugin config
 

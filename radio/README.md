@@ -50,8 +50,23 @@ Asset locations are constants at the top of `dj_library.py` / `radio_player.py`
 3. Launch Tricky Madness, drop into a course — the radio takes over.
 
 Config: `BepInEx/config/com.mtv.radiobig.cfg` (`Enabled`, `SuppressGameMusic`,
-`Host`, `Port`). Don't run this alongside the per-level `MusicPluginTrickyMaddness`
-— both fight over the music slot.
+`Host`, `Port`, and a `[Sources]` section with one switch per soundtrack —
+`SSX3`, `Tricky`, `OnTour`). Don't run this alongside the per-level
+`MusicPluginTrickyMaddness` — both fight over the music slot.
+
+⚠️ **`[Sources]` reaches the player by argv, not the environment** — env vars
+don't reliably survive to a wine-spawned child, which is the same reason
+`--assets` is an argument. The plugin always sends `--sources`, even when
+everything is on, so the player's log states the effective set instead of leaving
+it to be inferred. Filtering itself happens in `Library.__init__`, not in
+`DJBrain`: the brain rebuilds its shuffle bags and renormalises its weights from
+whatever the library hands it, so a source dropped there disappears cleanly all
+the way through with no second table to keep in sync. The DJ voice pool is
+deliberately **not** filtered — Atomika fronts the whole station.
+
+⚠️ Editing the Python here is inert until you re-run `./freeze.sh` (and
+`./freeze_windows.sh`) — the plugin launches the *frozen* player, so a source-only
+change tests nothing that ships.
 
 ## Dogfood without the game
 
