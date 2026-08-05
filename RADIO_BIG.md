@@ -92,22 +92,23 @@ the wrinkle that the **Windows `.exe` is frozen from macOS under CrossOver's Win
 
 ## The soundtrack pools
 
-Four asset dirs under `assets/`: `dj` (Atomika's voice clips) and three
-soundtracks — `ssx3`, `tricky`, `sxot` (SSX On Tour).
+Five asset dirs under `assets/`: `dj` (Atomika's voice clips) and four
+soundtracks — `ssx3`, `tricky`, `sxot` (SSX On Tour), `ssx2012` (SSX 2012).
 
 | Pool | Tracks | Artist-matched intros? |
 |---|---|---|
 | `ssx3` | 35 race + 3 hub loops | yes — ~28 have a dedicated Atomika intro naming the artist |
 | `tricky` | 21 + a menu loop + 2 alternate recordings | no — instrumental, and they predate this DJ |
 | `sxot` | 41 | no — On Tour dropped Atomika's station for a plain shuffle. One exception: **Queens Of The Stone Age are on both soundtracks**, so On Tour's *Medication* resolves to the real intro naming them |
+| `ssx2012` | 36 | no — 2012 has its own in-game DJ, not Atomika, so these ride the generic intros. Filenames carry real artists because the ripper reads them off the disc's own MBSI table (`tricky_mods: ssx/ssx2012_musicbox.py`) |
 
-⚠️ **`sxot` is optional and must stay that way.** It only exists if you own the
-PSP UMD and ran the ripper (`tricky_mods: ssx/audio_rip_music.py`). A missing
-pool reads as `not installed` in the startup diagnostic rather than
-`MISSING DIR`, `package.sh` skips it with a warning instead of failing its
-prereq check, and `DJBrain._next_song` **renormalises `SOURCE_WEIGHTS` over the
-pools that actually loaded** — so a two-soundtrack install plays at the old
-ratio rather than going quiet 15% of the time.
+⚠️ **`sxot` and `ssx2012` are optional and must stay that way.** Each only
+exists if you own that disc and ran the ripper (`tricky_mods:
+ssx/audio_rip_music.py`). A missing pool reads as `not installed` in the startup
+diagnostic rather than `MISSING DIR`, `package.sh` skips it with a warning
+instead of failing its prereq check, and `DJBrain._next_song` **renormalises
+`SOURCE_WEIGHTS` over the pools that actually loaded** — so a two-soundtrack
+install plays at the old ratio rather than going quiet 30% of the time.
 
 ⚠️ **`ssx3` and `tricky` are disc rips, and their FILENAMES are load-bearing.**
 Since 1.2.0 both pools come off the PS2 discs (`tricky_mods:
@@ -124,10 +125,17 @@ artist-matched intros stay at **32**.
 renormalisation (above) absorb it with no second table; the `dj` pool is never
 filtered. Details in `radio/README.md`.
 
-⚠️ **Adding a fourth soundtrack is two edits.** A `_list_music()` loop in
-`dj_library.Library.__init__` tagged with a new `source=`, *and* an entry in
-`DJBrain.SOURCE_WEIGHTS`. Forgetting the weight no longer loses the pool — the
-bags are built from **what actually loaded**, so an unweighted source plays at
+⚠️ **Adding a soundtrack is a checklist, not one edit.** In `dj_library.py`:
+a resolved path + env override in `_resolve_assets()` (and the module-level
+unpack below it), a row in `_log_asset_diag`'s table, the slug in
+`ALL_SOURCES`, and a `_list_music()` loop in `Library.__init__` tagged with the
+new `source=`. Then `DJBrain.SOURCE_WEIGHTS`, a `[Sources]` toggle in
+`RadioBig.cs`, and a `stage_optional` call + summary field in `package.sh`.
+None of them fails loudly. Miss the `_list_music()` loop and the pool simply
+never loads; miss `ALL_SOURCES` and the filter still works, but the plugin's own
+toggle gets denounced on stdout as "not a known soundtrack".
+Forgetting the **weight** no longer loses the pool — the bags are built from
+**what actually loaded**, so an unweighted source plays at
 `DJBrain.UNWEIGHTED_SHARE` and says so on stdout. (It used to be built from the
 weight table, which meant the songs loaded, counted, printed in the library dump
 and could never be drawn.)

@@ -79,11 +79,14 @@ class DJBrain:
 
     # How often each soundtrack comes up. SSX3 leads because it is the only one
     # Atomika can name the artist of — every SSX3 draw is a shot at the
-    # artist-matched intro, the other two can only ever land a generic one.
-    # ⚠️ Feel numbers, not measured. The pre-On-Tour split was 0.78/0.22 and the
-    # new source is carved out of SSX3's share rather than Tricky's, so Tricky
-    # doesn't get quieter than it already was.
-    SOURCE_WEIGHTS = {"ssx3": 0.66, "tricky": 0.19, "sxot": 0.15}
+    # artist-matched intro, the others can only ever land a generic one.
+    # ⚠️ Feel numbers, not measured. Each new soundtrack is carved out of SSX3's
+    # share rather than the others', so nothing that was already playing gets
+    # quieter when one is added: 0.78/0.22 before On Tour, 0.66/0.19/0.15 after,
+    # and SSX 2012 takes its 0.15 from SSX3 the same way. SSX3 keeps the lead at
+    # roughly half the rotation, which is the point of the ordering.
+    SOURCE_WEIGHTS = {"ssx3": 0.51, "tricky": 0.19, "sxot": 0.15,
+                      "ssx2012": 0.15}
     # What an installed-but-unweighted soundtrack plays at until someone gives
     # it a real share — enough to be obviously present, not enough to take over.
     UNWEIGHTED_SHARE = 0.10

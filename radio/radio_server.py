@@ -68,7 +68,7 @@ from dj_library import Library
 # Keep in sync with the plugin's BepInPlugin version in RadioBigPlugin/RadioBig.cs.
 # Purely cosmetic now (UDP: we send no reply) — the plugin attr is the version a
 # bug reporter's log actually shows. Sync it anyway.
-VERSION = "1.2.1"
+VERSION = "1.3.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 48757  # arbitrary high port; must match the plugin config
 
@@ -274,14 +274,16 @@ def main(argv=None):
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--assets", default=None,
-                    help="audio root (dj/ ssx3/ tricky/). Also read from "
+                    help="audio root (dj/ ssx3/ tricky/ sxot/ ssx2012/). Also read "
+                         "from "
                          "RADIO_BIG_ASSETS; the CLI arg is preferred under wine, "
                          "where the env var may not reach this child process. "
                          "Consumed at import (see top of file); listed here so "
                          "argparse accepts it.")
     ap.add_argument("--sources", default=None,
                     help="comma-separated soundtracks to play: any of "
-                         "ssx3,tricky,sxot. Omitted means all installed. Set "
+                         "ssx3,tricky,sxot,ssx2012. Omitted means all "
+                         "installed. Set "
                          "from the plugin's [Sources] config; passed by ARGV "
                          "rather than an env var for the same reason --assets "
                          "is (env does not reliably reach a wine-spawned "

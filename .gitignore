@@ -413,3 +413,7 @@ radio/*.spec
 
 # Windows freeze staging (regenerate via radio/freeze_windows.sh)
 radio/dist-windows/
+
+# macOS Finder metadata. radio/.DS_Store was tracked until 1.3.0 — it was never
+# meant to be, and it churns the diff every time the folder is opened.
+.DS_Store

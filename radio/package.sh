@@ -30,11 +30,12 @@ ASSETS_SRC="${RADIO_BIG_ASSETS_SRC:-$HOME/Library/Application Support/Steam/stea
 DJ_SRC="$ASSETS_SRC/dj"
 SSX3_SRC="$ASSETS_SRC/ssx3"
 TRICKY_SRC="$ASSETS_SRC/tricky"
-# SSX On Tour is OPTIONAL and deliberately absent from the prereq loop: it only
-# exists if whoever builds the pack owns the PSP UMD and ran the ripper
-# (tricky_mods: ssx/audio_rip_music.py). A pack without it is complete and
-# working — the DJ just draws from two soundtracks instead of three.
+# SSX On Tour and SSX (2012) are OPTIONAL and deliberately absent from the prereq
+# loop: each only exists if whoever builds the pack owns that disc and ran the
+# ripper (tricky_mods: ssx/audio_rip_music.py). A pack without them is complete
+# and working — the DJ just draws from fewer soundtracks.
 SXOT_SRC="$ASSETS_SRC/sxot"
+SSX2012_SRC="$ASSETS_SRC/ssx2012"
 
 # Required prerequisites (the DLL + the audio); players are per-OS and optional.
 for p in "$DLL" "$DJ_SRC" "$SSX3_SRC" "$TRICKY_SRC"; do
@@ -79,24 +80,30 @@ cp "$HERE/BUILD.md" "$OUT/source/BUILD.md"
 echo "  copying DJ voice clips…";   cp "$DJ_SRC"/*.mp3     "$OUT/RadioBig/assets/dj/"
 echo "  copying SSX3 soundtrack…";  cp "$SSX3_SRC"/*.mp3   "$OUT/RadioBig/assets/ssx3/"
 echo "  copying Tricky soundtrack…";cp "$TRICKY_SRC"/*.mp3 "$OUT/RadioBig/assets/tricky/"
-# Gate on actual MP3s, not on the directory: an empty-but-present sxot/ (a rip
+# Gate on actual MP3s, not on the directory: an empty-but-present pool dir (a rip
 # that died before writing anything) would leave `*.mp3` unexpanded, cp would
 # fail on the literal, and `set -e` would kill the pack at the very last step —
 # after everything else had already been copied.
-SXOT_N="$(ls "$SXOT_SRC"/*.mp3 2>/dev/null | wc -l | tr -d ' ')"
-if [ "$SXOT_N" -gt 0 ]; then
-  echo "  copying On Tour soundtrack…"
-  mkdir -p "$OUT/RadioBig/assets/sxot"
-  cp "$SXOT_SRC"/*.mp3 "$OUT/RadioBig/assets/sxot/"
-else
-  echo "  ! no On Tour soundtrack at $SXOT_SRC — packing without it" >&2
-fi
+stage_optional() {  # <src dir> <pool name> <label>; echoes the mp3 count
+  local n
+  n="$(ls "$1"/*.mp3 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "$n" -gt 0 ]; then
+    echo "  copying $3 soundtrack…" >&2
+    mkdir -p "$OUT/RadioBig/assets/$2"
+    cp "$1"/*.mp3 "$OUT/RadioBig/assets/$2/"
+  else
+    echo "  ! no $3 soundtrack at $1 — packing without it" >&2
+  fi
+  echo "$n"
+}
+SXOT_N="$(stage_optional "$SXOT_SRC" sxot "On Tour")"
+SSX2012_N="$(stage_optional "$SSX2012_SRC" ssx2012 "SSX 2012")"
 
 echo "done."
-printf 'players: %s   dj=%s ssx3=%s tricky=%s sxot=%s clips\n' \
+printf 'players: %s   dj=%s ssx3=%s tricky=%s sxot=%s ssx2012=%s clips\n' \
   "$(ls "$OUT/RadioBig/players" 2>/dev/null | tr '\n' ',' | sed 's/,$//')" \
   "$(ls "$OUT/RadioBig/assets/dj"/*.mp3     | wc -l | tr -d ' ')" \
   "$(ls "$OUT/RadioBig/assets/ssx3"/*.mp3   | wc -l | tr -d ' ')" \
   "$(ls "$OUT/RadioBig/assets/tricky"/*.mp3 | wc -l | tr -d ' ')" \
-  "$SXOT_N"
+  "$SXOT_N" "$SSX2012_N"
 du -sh "$OUT"

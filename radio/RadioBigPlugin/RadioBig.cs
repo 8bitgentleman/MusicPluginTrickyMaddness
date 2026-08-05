@@ -33,7 +33,7 @@ namespace RadioBigTM
     // the load-bearing copy — BepInEx logs it on plugin load, so it's what a bug
     // reporter's LogOutput.log shows. (The player's copy only appears in the HELLO
     // reply, which this plugin never reads, so it's cosmetic — but sync it anyway.)
-    [BepInPlugin("com.mtv.radiobig", "Radio Big", "1.2.1")]
+    [BepInPlugin("com.mtv.radiobig", "Radio Big", "1.3.0")]
     public class Plugin : BaseUnityPlugin
     {
         internal static Plugin Instance;
@@ -49,6 +49,7 @@ namespace RadioBigTM
         internal static ConfigEntry<bool> enableSsx3;
         internal static ConfigEntry<bool> enableTricky;
         internal static ConfigEntry<bool> enableOnTour;
+        internal static ConfigEntry<bool> enableSsx2012;
 
         internal static string CurrentLevelName;
         internal static RadioClient Client;
@@ -103,6 +104,8 @@ namespace RadioBigTM
                 "Play the SSX Tricky soundtrack.");
             enableOnTour = Config.Bind("Sources", "OnTour", true,
                 "Play the SSX On Tour soundtrack (only if its audio is installed).");
+            enableSsx2012 = Config.Bind("Sources", "SSX2012", true,
+                "Play the SSX (2012) soundtrack (only if its audio is installed).");
 
             // Transport = a shared command file (NOT a socket). The game's Unity
             // Mono under wine (CrossOver) never delivered our localhost datagrams to
@@ -218,6 +221,7 @@ namespace RadioBigTM
                 if (enableSsx3.Value) srcs.Add("ssx3");
                 if (enableTricky.Value) srcs.Add("tricky");
                 if (enableOnTour.Value) srcs.Add("sxot");
+                if (enableSsx2012.Value) srcs.Add("ssx2012");
                 if (srcs.Count == 0)
                     Log.LogWarning("[Sources] every soundtrack is switched off — " +
                                    "the DJ will talk but no music will play.");
