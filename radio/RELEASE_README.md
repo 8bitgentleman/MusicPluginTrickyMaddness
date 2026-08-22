@@ -1,11 +1,19 @@
 # Radio Big — a live DJ radio for Tricky Madness
 
-**Version 1.3.0.** Report bugs with the version line from `BepInEx/LogOutput.log`
-(`Loading [Radio Big 1.3.0]`) so it's clear which build you're on.
+**Version 1.4.0.** Report bugs with the version line from `BepInEx/LogOutput.log`
+(`Loading [Radio Big 1.4.0]`) so it's clear which build you're on.
 
 Turns the game's music slot into **Radio Big**, the SSX3 station: Atomika
 introduces each track by name, the lobby runs mountain news / rider gossip
 between races, and it's paced and shuffled so no two sessions sound alike.
+
+**New in 1.4.0:** an in-game **"now playing" pill** in the bottom-left corner
+during races. Closed, it's a small pulsing badge — amber with Atomika's face
+while he's talking, blue once the music is on. Wiggle the mouse and click it to
+open the banner: track title, artist, which soundtrack it's from, a progress
+bar, and **pause / skip** buttons that drive the radio directly. Click the badge
+again to close it. It only shows during a race, never over the menus. (Linux
+source users: the player now also needs `mutagen` — see the install step.)
 
 **New in 1.3.0:** the **SSX (2012)** soundtrack joins the station — 36 licensed
 tracks off that game's own disc, switchable like the rest under *Choosing which
@@ -91,7 +99,8 @@ No frozen Linux binary ships (freeze it yourself if you want auto-launch — see
 reconnects, so start order doesn't matter:
 
 1. Copy `RadioBigTM.dll` + `RadioBig/` into `BepInEx/plugins/` as above.
-2. Install the runtime: `pip3 install pygame`  (Python 3.9+).
+2. Install the runtime: `pip3 install pygame mutagen`  (Python 3.9+; mutagen
+   only reads track lengths for the pill's progress bar).
 3. Point the player at the shipped audio and start it:
    ```
    RADIO_BIG_ASSETS="/path/to/BepInEx/plugins/RadioBig/assets" \
@@ -116,6 +125,9 @@ spawn a (non-existent) bundled Linux player.
   you run the player yourself from source (Linux, or dev).
 - `Host` / `Port` — where the player listens (defaults are fine).
 - `VerboseLogging` — log every event forwarded to the player.
+
+There is no switch for the now-playing pill yet; it sits out of the way in the
+bottom-left and only appears during races.
 
 ---
 

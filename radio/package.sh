@@ -72,7 +72,13 @@ cp "$HERE/radio_server.py" "$HERE/dj_brain.py" "$HERE/dj_library.py" \
    "$HERE/radio_player.py" "$HERE/run_radio.sh" \
    "$HERE/freeze.sh" "$HERE/freeze_windows.sh" "$HERE/package.sh" \
    "$OUT/source/"
-cp "$HERE/RadioBigPlugin/RadioBig.cs" "$HERE/RadioBigPlugin/build.sh" \
+# Every file build.sh compiles or embeds, or the shipped source can't rebuild
+# the DLL: the three HUD .cs files, the two generated face PNGs and the script
+# that regenerates them.
+cp "$HERE/RadioBigPlugin/RadioBig.cs" "$HERE/RadioBigPlugin/RadioStatus.cs" \
+   "$HERE/RadioBigPlugin/RadioHud.cs" "$HERE/RadioBigPlugin/RadioHudGraphics.cs" \
+   "$HERE/RadioBigPlugin/dj_face_lit.png" "$HERE/RadioBigPlugin/dj_face_dark.png" \
+   "$HERE/RadioBigPlugin/make_dj_face.py" "$HERE/RadioBigPlugin/build.sh" \
    "$OUT/source/RadioBigPlugin/"
 cp "$HERE/BUILD.md" "$OUT/source/BUILD.md"
 
