@@ -1,0 +1,1444 @@
+<meta charset="utf-8">
+<title>Radio Big Pill</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Barlow+Semi+Condensed:ital,wght@0,400;0,500;0,600;1,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void-950:#05070c;
+    --night-900:#0a1220;
+    --night-800:#0e1a2c;
+    --slope-700:#16263d;
+    --slope-500:#2a4a70;
+    --frost-100:#eef6fb;
+    --frost-300:#c3d9e8;
+    --frost-500:#8fadc2;
+    --frost-700:#5b7488;
+    --cyan-300:#7ff2ff;
+    --cyan-400:#34e7ff;
+    --cyan-600:#0b8fae;
+    --cyan-900:#062f3a;
+    --magenta-400:#ff3fb4;
+    --magenta-600:#b0206f;
+    --amber-400:#ffb932;
+    --amber-600:#b87b12;
+    --glass-fill:rgba(8,18,32,.62);
+    --glass-fill-strong:rgba(6,14,26,.86);
+    --glass-border:rgba(255,255,255,.14);
+    --glass-border-hi:rgba(127,242,255,.55);
+    --ink-900:#0a1a24;    /* dark text/icons for the light steel-glass panel */
+    --ink-700:#33505f;
+    --shadow-ambient:0 20px 60px -20px rgba(0,0,0,.7);
+    --font-display:'Rajdhani',system-ui,sans-serif;
+    --font-body:'Barlow Semi Condensed',system-ui,sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--void-950);
+    color:var(--frost-100);
+    font-family:var(--font-body);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:28px;
+    padding:32px 16px 56px;
+  }
+
+  .page-head{max-width:840px;text-align:center;display:flex;flex-direction:column;gap:6px;}
+  .page-head .eyebrow{
+    font-family:var(--font-display);
+    font-weight:700;
+    letter-spacing:.22em;
+    text-transform:uppercase;
+    font-size:12px;
+    color:var(--cyan-400);
+  }
+  .page-head h1{
+    margin:0;
+    font-family:var(--font-display);
+    font-weight:700;
+    font-style:italic;
+    font-size:clamp(28px,4vw,40px);
+    letter-spacing:.01em;
+    text-wrap:balance;
+  }
+  .page-head p{
+    margin:0;
+    color:var(--frost-500);
+    font-size:16px;
+    line-height:1.5;
+    max-width:640px;
+    margin-inline:auto;
+  }
+
+  /* ---------- simulated game viewport ---------- */
+  .viewport{
+    position:relative;
+    width:min(960px,100%);
+    aspect-ratio:16/9;
+    border-radius:14px;
+    overflow:hidden;
+    border:1px solid var(--glass-border);
+    box-shadow:var(--shadow-ambient);
+    background:
+      radial-gradient(120% 90% at 15% 0%, rgba(127,242,255,.10), transparent 60%),
+      linear-gradient(180deg, var(--night-900) 0%, var(--night-800) 38%, var(--slope-700) 72%, var(--slope-500) 100%);
+    isolation:isolate;
+  }
+  .viewport::before{ /* sun glow */
+    content:"";
+    position:absolute;
+    top:8%; left:12%;
+    width:22%; aspect-ratio:1;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(255,201,150,.9), rgba(255,201,150,0) 70%);
+    filter:blur(2px);
+    opacity:.8;
+  }
+  .peaks{
+    position:absolute; inset:auto 0 0 0; height:62%;
+  }
+  .peaks svg{width:100%;height:100%;display:block;}
+  .stars{
+    position:absolute; inset:0 0 55% 0;
+    background-image:radial-gradient(1.5px 1.5px at 10% 20%, var(--frost-300), transparent),
+      radial-gradient(1.5px 1.5px at 24% 55%, var(--frost-300), transparent),
+      radial-gradient(1px 1px at 38% 12%, var(--frost-300), transparent),
+      radial-gradient(1.5px 1.5px at 52% 40%, var(--frost-300), transparent),
+      radial-gradient(1px 1px at 67% 22%, var(--frost-300), transparent),
+      radial-gradient(1.5px 1.5px at 81% 8%, var(--frost-300), transparent),
+      radial-gradient(1px 1px at 91% 34%, var(--frost-300), transparent);
+    opacity:.55;
+  }
+  .hud-corner{
+    position:absolute; top:16px; left:18px;
+    font-family:var(--font-display); font-weight:600;
+    font-size:11px; letter-spacing:.18em; text-transform:uppercase;
+    color:var(--frost-500);
+    display:flex; align-items:center; gap:8px;
+  }
+  .hud-corner .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan-400);box-shadow:0 0 8px var(--cyan-400);}
+
+  /* ================= RADIO BIG PILL ================= */
+  /* Angular HUD silhouette: top-right + bottom-left corners chamfered at 45deg.
+     Notch size is a fixed px length so the cut angle stays a true 45deg at any
+     panel width; every other polygon point is a percentage, so the shape tracks
+     the dynamic min(408px, 100% - 36px) sizing. */
+  /* .rb-pill is now just the anchored flex row — it draws nothing of its own.
+     The visible pieces are two separate shapes so the glyph badge reads as
+     sitting NEXT TO the banner rather than inside its glass: .rb-glyph is an
+     always-circular badge (pinned to the left, at the anchor point), and
+     .rb-banner is the panel that grows out to its right when open. They touch
+     (a small negative margin overlap) rather than sharing one silhouette. */
+  .rb-pill{
+    position:absolute;
+    left:18px; bottom:18px;
+    display:flex;
+    align-items:center;
+    color:var(--frost-100);
+    user-select:none;
+  }
+
+  /* ---- the banner: the panel that slides out to the RIGHT of the fixed badge.
+     Its own clip-path (constant, not tweened) both shapes the chamfered
+     silhouette AND clips the "Now: track" content while flex-basis animates
+     0 -> full width, so no separate overflow:hidden is needed. */
+  .rb-banner{
+    position:relative;
+    flex:0 0 0px;
+    min-width:0;
+    height:84px;
+    display:flex;
+    align-items:stretch;
+    clip-path:polygon(
+      0 0,
+      calc(100% - 20px) 0,
+      100% 20px,
+      100% 100%,
+      20px 100%,
+      0 calc(100% - 20px));
+    box-shadow:0 16px 40px -12px rgba(0,0,0,0);
+    transition:flex-basis .46s cubic-bezier(.16,1,.3,1), margin-left .46s cubic-bezier(.16,1,.3,1), box-shadow .3s ease;
+  }
+  .rb-pill.is-open .rb-banner{
+    /* fixed target width, capped by actual viewport room (not the pill's own
+       auto-sized box — that self-references and was starving .rb-progress
+       down to 0px, since flex-basis% on an auto-width flex container
+       resolves against its own content, which depends on this very value) */
+    flex-basis:340px;
+    max-width:calc(100vw - 120px);
+    margin-left:-14px;
+    box-shadow:0 16px 40px -12px rgba(0,0,0,.65);
+  }
+
+  /* ---- rim + glass: the outer layer is a brushed metal rim, ::before is the
+     tinted glass punched 2px inside it so the metal reads as a real frame that
+     traces the chamfers. Four stacked layers, cheapest first:
+       1. brushed striations  – fine repeating diagonal scratches on the metal
+       2. neon corner bleed   – cyan concentrated at the two 45deg chamfers
+       3. the metal itself    – LIGHT anodised aluminium, near-white to pale
+          steel-blue, not the gunmetal/navy of the collapsed badge — this is
+          what makes the pulled-out panel read as steel, not a dark HUD chip.
+     Everything here is gradients + box-shadow: no backdrop-filter (Chrome does
+     not clip it to clip-path, see .rb-pill.is-open), no filter on a live box. */
+  .rb-frame{
+    position:absolute;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    opacity:0;
+    background:
+      linear-gradient(45deg,
+        rgba(190,250,255,.95) 0%,
+        rgba(127,242,255,.55) 9%,
+        rgba(52,231,255,.10) 24%,
+        rgba(52,231,255,.06) 50%,
+        rgba(52,231,255,.10) 76%,
+        rgba(127,242,255,.55) 91%,
+        rgba(190,250,255,.95) 100%),
+      linear-gradient(146deg,
+        #ffffff 0%,
+        #c7d8e4 8%,
+        #ffffff 15%,
+        #a9bfcf 26%,
+        #e2edf4 37%,
+        #96aebf 50%,
+        #d7e5ee 61%,
+        #a3b9c9 72%,
+        #ffffff 83%,
+        #bbcedb 91%,
+        #f1f7fb 100%);
+    /* frame + inner fill tween their notches on the same curve as the pill's own
+       clip-path, so the three silhouettes stay in lockstep through the expand */
+    clip-path:polygon(0 0, 100% 0, 100% 0, 100% 100%, 0 100%, 0 100%);
+    transition:opacity .34s ease .06s, clip-path .46s cubic-bezier(.16,1,.3,1);
+  }
+  .rb-pill.is-open .rb-frame{
+    opacity:1;
+    clip-path:polygon(
+      0 0,
+      calc(100% - 20px) 0,
+      100% 20px,
+      100% 100%,
+      20px 100%,
+      0 calc(100% - 20px));
+  }
+  /* the glass itself: a pale, TRANSLUCENT steel-glass pane, not a tinted
+     cockpit canopy — no backdrop-filter (see the Chrome clip-path bug above),
+     so the "transparent" read comes from genuinely low-alpha whites/blues that
+     let whatever sits behind the pill (the viewport sky) tint through, plus a
+     top-lit sheen and a cyan bounce climbing out of the bottom-left chamfer.
+     The box-shadow stack is the bevel: a bright lit seat, a soft grey sill
+     (not black — the pane never goes dark), and the rim neon bleeding inward. */
+  .rb-frame::before{
+    content:"";
+    position:absolute;
+    inset:3px;
+    background:
+      radial-gradient(125% 170% at 3% -38%,
+        rgba(255,255,255,.60), rgba(255,255,255,.16) 34%, rgba(255,255,255,0) 62%),
+      radial-gradient(78% 132% at 0% 112%,
+        rgba(52,231,255,.30), rgba(52,231,255,0) 56%),
+      radial-gradient(120% 190% at 104% 128%,
+        rgba(20,42,64,.16), rgba(20,42,64,0) 58%),
+      linear-gradient(116deg,
+        rgba(255,255,255,0) 32%,
+        rgba(255,255,255,.40) 44%,
+        rgba(255,255,255,.12) 51%,
+        rgba(255,255,255,0) 60%),
+      linear-gradient(167deg,
+        rgba(244,250,253,.38) 0%,
+        rgba(220,235,244,.32) 22%,
+        rgba(198,218,232,.28) 54%,
+        rgba(180,202,218,.30) 82%,
+        rgba(164,188,206,.34) 100%);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,.60),     /* bright seat: the pane sits IN the frame */
+      inset 0 2px 0 -1px rgba(255,255,255,.75),  /* lit top bevel, just inside the seat */
+      inset 0 -2px 0 -1px rgba(40,64,86,.26),    /* soft grey sill, never black */
+      inset 0 0 26px -4px rgba(52,231,255,.36),  /* rim neon bleeding through the glass */
+      inset 0 16px 30px -16px rgba(30,54,76,.20);/* faint depth under the bevel */
+    clip-path:polygon(0 0, 100% 0, 100% 0, 100% 100%, 0 100%, 0 100%);
+    transition:clip-path .46s cubic-bezier(.16,1,.3,1), box-shadow .3s ease;
+  }
+  /* notch = the pill's 20px chamfer minus the 3px rim, so the inner cut stays
+     parallel to the outer one and the metal keeps a constant width round it */
+  .rb-pill.is-open .rb-frame::before{
+    clip-path:polygon(
+      0 0,
+      calc(100% - 17px) 0,
+      100% 17px,
+      100% 100%,
+      17px 100%,
+      0 calc(100% - 17px));
+  }
+  .rb-pill.is-dj-talking .rb-frame{
+    background:
+      linear-gradient(45deg,
+        rgba(255,224,150,.95) 0%,
+        rgba(255,185,50,.55) 9%,
+        rgba(255,185,50,.10) 24%,
+        rgba(255,185,50,.06) 50%,
+        rgba(255,185,50,.10) 76%,
+        rgba(255,185,50,.55) 91%,
+        rgba(255,224,150,.95) 100%),
+      linear-gradient(146deg,
+        #fffaf0 0%,
+        #e2d2b4 8%,
+        #fffaf0 15%,
+        #cbb890 26%,
+        #f3e7d2 37%,
+        #bda87d 50%,
+        #eeddc2 61%,
+        #c7b48c 72%,
+        #fffaf0 83%,
+        #d9c7a4 91%,
+        #f8efdf 100%);
+  }
+  .rb-pill.is-dj-talking .rb-frame::before{
+    box-shadow:
+      inset 0 0 0 1px rgba(255,250,240,.62),
+      inset 0 2px 0 -1px rgba(255,250,240,.78),
+      inset 0 -2px 0 -1px rgba(90,68,30,.26),
+      inset 0 0 24px -4px rgba(255,185,50,.34),
+      inset 0 15px 30px -16px rgba(80,60,26,.20);
+  }
+
+  /* ---- viewfinder brackets at the two cut corners ---- */
+  .rb-bracket{
+    position:absolute;
+    width:46px;height:46px;
+    opacity:0;
+    transition:opacity .26s ease .14s;
+  }
+  .rb-bracket::before,
+  .rb-bracket::after{
+    content:"";
+    position:absolute;
+    background:var(--cyan-300);
+    box-shadow:0 0 6px rgba(52,231,255,.9), 0 0 15px rgba(52,231,255,.5);
+  }
+  .rb-bracket.tr{top:0;right:0;}
+  .rb-bracket.tr::before{top:0;right:20px;width:24px;height:2px;}
+  .rb-bracket.tr::after{top:20px;right:0;width:2px;height:24px;}
+  .rb-bracket.bl{bottom:0;left:0;}
+  .rb-bracket.bl::before{bottom:0;left:20px;width:24px;height:2px;}
+  .rb-bracket.bl::after{bottom:20px;left:0;width:2px;height:24px;}
+  .rb-pill.is-open .rb-bracket{opacity:1;}
+  .rb-pill.is-dj-talking .rb-bracket::before,
+  .rb-pill.is-dj-talking .rb-bracket::after{
+    background:var(--amber-400);
+    box-shadow:0 0 6px rgba(255,185,50,.9), 0 0 15px rgba(255,185,50,.5);
+  }
+
+  /* ---- the LED trace: a broken (dashed) neon line tracing the panel's own
+     chamfer, riding on top of the steel/glass rather than a continuous glow
+     rim. viewBox is the panel's actual open-state pixel size (408x84) so the
+     hand-picked chamfer points line up with the clip-path notch exactly at
+     full width; narrower widths (mobile) stretch it slightly, which is fine
+     for a decorative accent. Two stroked passes, same trick as the canvas
+     glyph's own trace: a soft wide glow under a thin hot dashed core. */
+  .rb-led{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .26s ease .16s;
+  }
+  .rb-pill.is-open .rb-led{opacity:1;}
+  .rb-led .glow{
+    fill:none;
+    stroke:var(--cyan-400);
+    stroke-width:6;
+    stroke-linecap:round;
+    stroke-dasharray:15 12;
+    opacity:.55;
+    filter:blur(2.5px);
+  }
+  .rb-led .core{
+    fill:none;
+    stroke:var(--cyan-400);
+    stroke-width:2.2;
+    stroke-linecap:butt;
+    stroke-dasharray:15 12;
+    filter:drop-shadow(0 0 4px rgba(52,231,255,.95)) drop-shadow(0 0 1px rgba(11,143,174,.9));
+  }
+  .rb-pill.is-dj-talking .rb-led .glow,
+  .rb-pill.is-dj-talking .rb-led .core{stroke:var(--amber-400);}
+  .rb-pill.is-dj-talking .rb-led .core{filter:drop-shadow(0 0 4px rgba(255,185,50,.95)) drop-shadow(0 0 1px rgba(184,123,18,.9));}
+  @media (prefers-reduced-motion: no-preference){
+    .rb-led .glow, .rb-led .core{animation:rbLedCrawl 5.5s linear infinite;}
+  }
+  @keyframes rbLedCrawl{to{stroke-dashoffset:-108;}}
+
+  /* ---- collapsed "a track changed" cue: one-shot outward ring, no new UI ---- */
+  .rb-pill.is-cue .rb-glyph{animation:rbCue .7s cubic-bezier(.16,1,.3,1);}
+  @keyframes rbCue{
+    0%{
+      border-color:var(--cyan-300);
+      box-shadow:0 8px 24px -10px rgba(0,0,0,.6),
+                 0 0 0 0 rgba(52,231,255,.55),
+                 0 0 12px 0 rgba(52,231,255,.45),
+                 0 0 0 1px rgba(0,0,0,.2) inset;
+    }
+    100%{
+      border-color:var(--glass-border);
+      box-shadow:0 8px 24px -10px rgba(0,0,0,.6),
+                 0 0 0 16px rgba(52,231,255,0),
+                 0 0 12px 0 rgba(52,231,255,0),
+                 0 0 0 1px rgba(0,0,0,.2) inset;
+    }
+  }
+
+  /* idle glyph: the badge itself, ALWAYS a circle — pinned at the anchor
+     point, never absorbed into the banner's panel shape. It grows to match
+     the banner's own 84px height exactly when open (both axes, so it stays
+     round), and the banner steps left to overlap it, which is the
+     "connected, not inside" read the reference calls for: two shapes
+     touching, not one shared silhouette. */
+  .rb-glyph{
+    position:relative;
+    z-index:2;
+    flex:0 0 56px;
+    height:56px;
+    display:flex; align-items:center; justify-content:center;
+    background-color:var(--glass-fill);
+    backdrop-filter:blur(14px) saturate(140%);
+    -webkit-backdrop-filter:blur(14px) saturate(140%);
+    border:1px solid var(--glass-border);
+    border-radius:50%;
+    box-shadow:0 8px 24px -10px rgba(0,0,0,.6), 0 0 0 1px rgba(0,0,0,.2) inset;
+    overflow:hidden;
+    cursor:pointer;
+    transition:
+      flex-basis .46s cubic-bezier(.16,1,.3,1),
+      height .46s cubic-bezier(.16,1,.3,1),
+      background-color .4s ease,
+      border-color .3s ease,
+      box-shadow .3s ease,
+      transform .2s ease;
+  }
+  .rb-glyph:hover{border-color:var(--glass-border-hi);}
+  .rb-glyph:active{transform:scale(.98);}
+  .rb-pill.is-open .rb-glyph{flex-basis:84px; height:84px;}
+
+  /* dark halo seated behind the glyph so it still reads as a glowing lattice
+     once the surrounding glass goes light/steel — without this the canvas's
+     additive cyan strokes wash out against a pale background. Sits behind
+     the canvas (z-index:auto, painted first in source order) and above
+     .rb-frame (z-index:0). */
+  .rb-glyph::before{
+    content:"";
+    position:absolute;
+    inset:-6px;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(6,16,26,.55) 0%, rgba(6,16,26,.30) 55%, rgba(6,16,26,0) 78%);
+    opacity:0;
+    transition:opacity .3s ease .1s;
+    pointer-events:none;
+  }
+  .rb-pill.is-open .rb-glyph::before{opacity:1;}
+
+  /* The canvas fills whatever box .rb-glyph currently is (56px idle,
+     64px when .rb-pill.is-open). No fixed px here — the pill's own
+     flex-basis transition animates the box and PulseFieldGlyph's own
+     ResizeObserver re-allocates the backing store to match. */
+  .pf-canvas{
+    display:block;
+    width:100%;
+    height:100%;
+    /* the glyph glows via additive compositing inside the canvas itself;
+       this is just the soft ground-shadow that seats it on the glass */
+    filter:drop-shadow(0 0 6px rgba(11,143,174,.30));
+    transition:filter .35s ease;
+  }
+  .rb-pill.is-dj-talking .pf-canvas{
+    filter:drop-shadow(0 0 7px rgba(184,123,18,.34));
+  }
+  .rb-pill.is-paused .pf-canvas{
+    filter:drop-shadow(0 0 4px rgba(11,143,174,.16));
+  }
+  @media (prefers-reduced-motion: reduce){
+    .pf-canvas{transition:none;}
+  }
+
+  /* expanded content — two rows filling the banner's full 84px height:
+     row 1 is the tag + title only (full width, so the title has room
+     instead of truncating), row 2 is transport controls to the LEFT of
+     the progress bar so the top row never has to share space with them. */
+  .rb-body{
+    position:relative;
+    z-index:1;
+    flex:1 1 auto;
+    min-width:0;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:6px;
+    padding:0 14px 0 12px;
+    opacity:0;
+    transform:translateX(6px);
+    pointer-events:none;
+    transition:opacity .28s ease .1s, transform .28s ease .1s;
+  }
+  .rb-pill.is-open .rb-body{opacity:1;transform:none;pointer-events:auto;}
+
+  .rb-meta{min-width:0;flex:0 0 auto;display:flex;align-items:center;gap:8px;}
+  .rb-bottom-row{min-width:0;flex:0 0 auto;display:flex;align-items:center;gap:10px;}
+  .rb-tag{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:9px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--night-900);
+    background:var(--frost-500);
+    padding:1px 6px;
+    flex:0 0 auto;
+    clip-path:polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%);
+  }
+  .rb-tag.custom{background:var(--magenta-400);color:#2a0716;}
+  .rb-title{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:21px;
+    letter-spacing:.02em;
+    text-transform:uppercase;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    line-height:26px;
+    min-width:0;
+    flex:1 1 auto;
+    color:var(--ink-900);
+  }
+  .rb-title.is-changing{animation:titleSwap .38s cubic-bezier(.16,1,.3,1);}
+  @keyframes titleSwap{
+    0%{transform:translateY(70%);opacity:0;}
+    100%{transform:translateY(0);opacity:1;}
+  }
+  .rb-progress{
+    flex:1 1 auto;
+    min-width:0;
+    height:3px;
+    border-radius:2px;
+    background:rgba(10,26,40,.14);
+    position:relative;
+    overflow:hidden;
+  }
+  .rb-progress .fill{
+    position:absolute; inset:0 auto 0 0;
+    width:0%;
+    background:linear-gradient(90deg,var(--cyan-600),var(--cyan-300));
+    border-radius:2px;
+    transition:width .25s linear;
+  }
+  .rb-progress .fill::after{
+    content:"";
+    position:absolute; top:0; right:0; bottom:0; width:14px;
+    background:linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.85));
+    filter:blur(1px);
+    opacity:.7;
+  }
+
+  /* transport sits to the left of the progress bar, in the banner's bottom
+     row — the top row is tag+title only, so this never competes for width */
+  .rb-transport{display:flex;align-items:center;gap:3px;flex:0 0 auto;}
+  .rb-btn{
+    width:28px;height:28px;
+    border-radius:3px;
+    clip-path:polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
+    border:1px solid transparent;
+    background:transparent;
+    color:var(--ink-700);
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease, transform .1s ease;
+  }
+  .rb-btn svg{width:14px;height:14px;}
+  .rb-btn:hover{background:rgba(10,26,40,.08);color:var(--ink-900);}
+  .rb-btn:active{transform:scale(.88);}
+  .rb-btn.primary{
+    width:34px;height:34px;
+    clip-path:polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+    background:var(--cyan-400);
+    color:var(--night-900);
+    box-shadow:0 0 14px rgba(52,231,255,.45);
+  }
+  .rb-btn.primary:hover{background:var(--cyan-300);}
+  .rb-btn.primary svg{width:15px;height:15px;}
+
+  .rb-time{
+    font-family:var(--font-display);
+    font-variant-numeric:tabular-nums;
+    font-size:11px;
+    color:var(--ink-700);
+    flex:0 0 auto;
+    padding-left:2px;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .rb-title.is-changing{animation:none !important;}
+    .rb-pill, .rb-banner, .rb-glyph, .rb-body, .rb-frame, .rb-bracket{transition-duration:.01ms !important;}
+    .rb-pill.is-cue{animation-duration:.4s;}
+  }
+
+  /* ---------- director's console (prototype-only, visually separate from HUD) ---------- */
+  .console{
+    width:min(960px,100%);
+    background:var(--night-800);
+    border:1px solid var(--glass-border);
+    border-radius:14px;
+    padding:18px 20px 20px;
+  }
+  .console-head{
+    display:flex; align-items:center; gap:10px;
+    margin-bottom:14px;
+  }
+  .console-head .chip{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:10px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--night-900);
+    background:var(--frost-500);
+    padding:2px 8px;
+    border-radius:5px;
+  }
+  .console-head h2{
+    margin:0; font-family:var(--font-display); font-weight:600; font-size:15px;
+    letter-spacing:.02em; color:var(--frost-300);
+  }
+  .console-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:10px;
+  }
+  .console-btn{
+    font-family:var(--font-body);
+    font-weight:600;
+    font-size:13.5px;
+    color:var(--frost-100);
+    background:rgba(255,255,255,.04);
+    border:1px solid var(--glass-border);
+    border-radius:9px;
+    padding:10px 12px;
+    text-align:left;
+    cursor:pointer;
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    transition:background .15s ease, border-color .15s ease;
+  }
+  .console-btn:hover{background:rgba(255,255,255,.08);border-color:var(--glass-border-hi);}
+  .console-btn small{font-weight:400;color:var(--frost-700);font-size:11.5px;}
+  .console-btn.active{border-color:var(--cyan-400);background:rgba(52,231,255,.08);}
+
+  .footnote{
+    max-width:840px;
+    color:var(--frost-700);
+    font-size:12.5px;
+    line-height:1.6;
+    text-align:center;
+  }
+  .footnote code{
+    background:rgba(255,255,255,.06);
+    padding:1px 5px;
+    border-radius:4px;
+    font-size:11.5px;
+  }
+</style>
+
+<div class="page-head">
+  <span class="eyebrow">Radio Big — HUD prototype</span>
+  <h1>The pill, not the picture</h1>
+  <p>A working mock of the now-playing widget — click it to expand, or drive it from the console below. This is real HTML/CSS/JS, not a still: every motion here is the motion we'd port into the Hook's OnGUI.</p>
+</div>
+
+<div class="viewport" id="viewport">
+  <div class="stars"></div>
+  <div class="peaks">
+    <svg viewBox="0 0 960 340" preserveAspectRatio="none">
+      <polygon points="0,340 0,180 140,60 260,150 360,40 480,170 620,70 760,160 860,90 960,180 960,340" fill="#0f2338"></polygon>
+      <polygon points="0,340 0,230 180,140 320,210 460,120 600,220 760,150 900,215 960,190 960,340" fill="#183451"></polygon>
+    </svg>
+  </div>
+  <div class="hud-corner"><span class="dot"></span> Snowdream — Run 1</div>
+
+  <div class="rb-pill" id="pill" role="button" tabindex="0" aria-label="Radio Big — expand now playing">
+    <div class="rb-glyph">
+      <canvas class="pf-canvas" aria-hidden="true"></canvas>
+    </div>
+
+    <div class="rb-banner">
+      <div class="rb-frame" aria-hidden="true">
+        <span class="rb-bracket tr"></span>
+        <span class="rb-bracket bl"></span>
+        <svg class="rb-led" viewBox="0 0 340 84" preserveAspectRatio="none">
+          <polygon class="glow" points="0,0 320,0 340,20 340,84 20,84 0,64"></polygon>
+          <polygon class="core" points="0,0 320,0 340,20 340,84 20,84 0,64"></polygon>
+        </svg>
+      </div>
+
+      <div class="rb-body">
+        <div class="rb-meta">
+          <span class="rb-tag" id="sourceTag">SSX3</span>
+          <div class="rb-title" id="trackTitle">Elysium Alps</div>
+        </div>
+        <div class="rb-bottom-row">
+          <div class="rb-transport">
+            <button class="rb-btn" id="btnPrev" title="Previous" aria-label="Previous track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM19 6.5 9.5 12 19 17.5z"/></svg>
+            </button>
+            <button class="rb-btn primary" id="btnPlay" title="Play/Pause" aria-label="Play or pause">
+              <svg id="iconPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
+              <svg id="iconPause" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+            </button>
+            <button class="rb-btn" id="btnNext" title="Next" aria-label="Next track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM5 6.5 14.5 12 5 17.5z"/></svg>
+            </button>
+          </div>
+          <div class="rb-progress"><div class="fill" id="progressFill"></div></div>
+          <div class="rb-time" id="timeLabel">0:00</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="console">
+  <div class="console-head">
+    <span class="chip">Prototype only</span>
+    <h2>Director's console — stands in for the game/Python side</h2>
+  </div>
+  <div class="console-grid">
+    <button class="console-btn" id="cPlayPause"><span id="cPlayPauseLabel">Pause</span><small>what the transport controls also do</small></button>
+    <button class="console-btn" id="cNext">Skip to next track<small>advances the mock queue</small></button>
+    <button class="console-btn" id="cPrev">Back to previous<small>rewinds the mock queue</small></button>
+    <button class="console-btn" id="cDj">Simulate DJ Atomika banter<small>ring + bars flip to the "live" amber cue</small></button>
+    <button class="console-btn" id="cCustom">Drop a file in radio/custom/<small>shows a user track picked up mid-set</small></button>
+    <button class="console-btn" id="cMotion">Reduced motion: <span id="motionState">off</span><small>preview the accessible fallback</small></button>
+  </div>
+</div>
+
+<p class="footnote">
+  Idle capsule is 56px — matches the concept's scale. Once open it stays open: the transport controls never collapse it, only a click outside the panel, <code>Esc</code>, or 5s of the pointer being away from it. There are no pop-up notifications: a track changing while the capsule is idle just flicks a single cyan ring off its border, and a change while it's open rides the title's slide. The queue below cycles four mock tracks including one tagged <code>CUSTOM</code>, standing in for a track picked up from a user's own <code>radio/custom/</code> folder once the Python side globs it like the other three soundtracks.
+</p>
+
+<script>
+/* =========================================================================
+   PulseFieldGlyph v2 — Canvas 2D "sound reactive pulse lattice" HUD glyph.
+
+   Shape: a WIDE, PINCHED lattice sheet (not a sphere). A rectangular grid in
+   normalised (xn,yn) space is displaced by a taper factor
+   pow(cos(xn*PI/2), 1.5) that drives both the vertical extent and the z-depth
+   to zero at the left/right ends — fat in the middle, a thin point at each
+   end (stretched eye / leaf / hourglass silhouette). Every lattice row also
+   rides the SAME oscilloscope trace that the bright centreline draws, so the
+   whole sheet undulates as one waveform. Cheap fake-3D: yaw + pitch rotation
+   and a single perspective divide.
+   ========================================================================= */
+class PulseFieldGlyph {
+  constructor(canvas, opts = {}){
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    const o = Object.assign({
+      latRings: 5,        // legacy name — now: lattice ROWS (horizontal lines)
+      lonLines: 10,       // legacy name — now: lattice COLUMNS (vertical ribs)
+      segments: 26,       // samples per row (doubled internally)
+      face: true,         // allow the DJ ID icon at all (state still gates it)
+      faceScale: 1,
+      bloom: 1,
+      lineScale: 1,
+    }, opts);
+    // New, clearer names; the old ellipsoid-era names keep working unchanged.
+    o.rows = Math.max(2, o.rows || o.latRings);
+    o.cols = Math.max(2, o.cols || o.lonLines);
+    this.o = o;
+
+    this.state = 'idle';
+    this.t = 0;            // animation clock (s)
+    this.rot = 0;          // slow yaw phase accumulator
+    this.level = 0.2;      // smoothed "audio" level
+    this.p = this._targets('idle');  // current (lerped) params
+    this._last = 0;
+    this._raf = null;
+    // live query, not a one-shot read: the OS setting can flip while the page
+    // is open, and a glyph that keeps its rAF loop running after the user asks
+    // for reduced motion is exactly the thing the setting exists to stop.
+    this._mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this._reduced = this._mq.matches;
+    this._onMQ = e => this.setReducedMotion(e.matches);
+    if (this._mq.addEventListener) this._mq.addEventListener('change', this._onMQ);
+    else this._mq.addListener(this._onMQ);   // Safari < 14
+
+    // offscreen buffer — the whole scene is drawn crisp there, then composited
+    // back through two blurred passes to get the bloom for free (3 drawImage
+    // calls instead of shadowBlur on every stroke).
+    this.buf = document.createElement('canvas');
+    this.bctx = this.buf.getContext('2d');
+
+    this._resize();
+    if (window.ResizeObserver){
+      this._ro = new ResizeObserver(() => this._resize());
+      this._ro.observe(canvas);
+    }
+    this.start();
+  }
+
+  /* ---------------- public API (IDENTICAL to v1) ---------------- */
+  setState(s){
+    if (s === this.state) return;
+    this.state = s;
+    if (this._reduced) this._drawStatic();
+  }
+  setReducedMotion(on){
+    this._reduced = !!on;
+    if (on){ this.stop(); this._drawStatic(); }
+    else this.start();
+  }
+  start(){
+    if (this._reduced){ this._drawStatic(); return; }
+    if (this._raf) return;
+    this._last = performance.now();
+    const loop = (now) => {
+      this._raf = requestAnimationFrame(loop);
+      const dt = Math.min(0.05, (now - this._last) / 1000);
+      this._last = now;
+      this._step(dt);
+      this._draw();
+    };
+    this._raf = requestAnimationFrame(loop);
+  }
+  stop(){ if (this._raf){ cancelAnimationFrame(this._raf); this._raf = null; } }
+  destroy(){
+    this.stop();
+    if (this._ro) this._ro.disconnect();
+    if (this._mq.removeEventListener) this._mq.removeEventListener('change', this._onMQ);
+    else this._mq.removeListener(this._onMQ);
+  }
+
+  /* ---------------- sizing ---------------- */
+  _resize(){
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    const r = this.canvas.getBoundingClientRect();
+    const w = Math.max(8, Math.round(r.width  || this.canvas.clientWidth  || 56));
+    const h = Math.max(8, Math.round(r.height || this.canvas.clientHeight || 56));
+    if (this.w === w && this.h === h && this.dpr === dpr) return;
+    this.w = w; this.h = h; this.dpr = dpr;
+    for (const c of [this.canvas, this.buf]){
+      c.width  = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+    }
+    this.bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // one "unit" ~ how big the glyph is, used to keep stroke weights sane
+    this.k = Math.min(w, h) / 56;
+    if (this._reduced) this._drawStatic();
+  }
+
+  /* ---------------- state params ----------------
+     warp   : lattice wobble amplitude (was: ellipsoid radial warp)
+     spike  : waveform trace amplitude
+     spin   : yaw sway amplitude of the fake-3D rotation (was: lattice spin)
+     faceA  : DJ icon fade-in weight — NEW in v2, only ever non-zero while the
+              state is 'dj-talking' (it is also hard-gated at draw time). */
+  _targets(s){
+    switch (s){
+      case 'playing':    return { warp:0.220, spike:0.95, speed:1.45, spin:0.55, erratic:0.26, glow:1.00, dim:1.00, amber:0, faceA:0 };
+      case 'dj-talking': return { warp:0.140, spike:0.70, speed:1.70, spin:0.30, erratic:1.00, glow:0.92, dim:0.85, amber:1, faceA:1 };
+      case 'paused':     return { warp:0.060, spike:0.16, speed:0.10, spin:0.06, erratic:0.00, glow:0.45, dim:0.45, amber:0, faceA:0 };
+      default:           return { warp:0.160, spike:0.55, speed:0.60, spin:0.22, erratic:0.16, glow:0.78, dim:0.82, amber:0, faceA:0 };
+    }
+  }
+
+  _step(dt){
+    const tgt = this._targets(this.state);
+    const k = Math.min(1, dt * 3.2);
+    for (const key in tgt) this.p[key] += (tgt[key] - this.p[key]) * k;
+
+    this.t += dt * (0.35 + this.p.speed);
+    this.rot += dt * (0.10 + this.p.spin * 0.55);
+
+    // fake "audio" envelope — never a real analyser, just something alive
+    let target;
+    if (this.state === 'playing'){
+      const beat = Math.pow(Math.max(0, Math.sin(this.t * 3.4)), 6);     // ~kick
+      target = 0.30 + 0.55 * beat + 0.22 * fbm1(this.t * 2.2);
+    } else if (this.state === 'dj-talking'){
+      const gate = smoothstep(0.34, 0.52, fbm1(this.t * 0.55 + 11.3));   // phrases + gaps
+      const syl  = fbm1(this.t * 7.5) * fbm1(this.t * 3.1 + 4.2) * 1.6;  // syllables
+      target = 0.10 + gate * (0.22 + syl);
+    } else if (this.state === 'paused'){
+      target = 0.05;
+    } else {
+      target = 0.24 + 0.14 * Math.sin(this.t * 1.15) + 0.08 * fbm1(this.t * 0.8);
+    }
+    const rate = this.state === 'dj-talking' ? 16 : 9;
+    this.level += (target - this.level) * Math.min(1, dt * rate);
+  }
+
+  /* ---------------- colour (unchanged from v1) ---------------- */
+  _rgb(shade){
+    const a = clamp(this.p.amber, 0, 1);
+    const cy = mix3(CY_DIM, CY_HOT, shade);
+    const am = mix3(AM_DIM, AM_HOT, shade);
+    return mix3(cy, am, a);
+  }
+  _css(shade, alpha){
+    const c = this._rgb(shade);
+    return `rgba(${c[0]|0},${c[1]|0},${c[2]|0},${clamp(alpha,0,1).toFixed(3)})`;
+  }
+
+  /* ---------------- geometry ---------------- */
+
+  // Grid wobble riding on top of the taper. Low-frequency sines in x and y so
+  // the sheet ripples like a struck membrane; the erratic term adds the uneven
+  // per-region jitter that reads as speech rather than a beat.
+  _grid(xn, yn){
+    const t = this.t, e = this.p.erratic;
+    const A = clamp(this.p.warp * 1.7, 0, 0.44) * (0.45 + this.level * 0.95);
+    let n = Math.sin(xn * 10.5 - t * 2.6) * 0.5
+          + Math.sin(yn *  7.5 + t * 2.0) * 0.5;
+    if (e > 0.01) n += (fbm1(xn * 4.0 + t * 4.5) * 2 - 1) * 0.55 * e;
+    return n * A;
+  }
+
+  // The oscilloscope trace, in halfH units. The lattice rows ride a damped
+  // fraction of this (LATTICE_RIDE) — that shared displacement is what makes
+  // the whole glyph read as ONE waveform instead of a grid with a line on top,
+  // while the damping keeps the sheet a readable sheet instead of a spiky mess.
+  _trace(xn){
+    const tp = Math.pow(taperAt(xn), 0.55);   // softer taper: middle is free to
+    const v = this._wave(xn) * 0.62 * tp;     // swing, both tips stay pinned
+    return 1.05 * Math.tanh(v / 1.05);        // soft ceiling instead of a clip
+  }
+
+  // raw waveform displacement at normalised horizontal position q (-1 .. 1)
+  _wave(q){
+    const t = this.t, e = this.p.erratic;
+    const x = q * 3.2;
+    let n = fbm1(x * 2.4 + t * 3.6) * 2 - 1;
+    n += (fbm1(x * 6.3 - t * 5.6) * 2 - 1) * (0.55 + e * 0.55);
+    // sharpen into spikes rather than smooth hills
+    n = Math.sign(n) * Math.pow(Math.abs(n) / 1.45, 0.55);
+    if (e > 0.01){
+      const burst = fbm1(x * 11.7 + t * 9.4);
+      n *= 1 + e * 1.5 * Math.pow(burst, 3);
+      const gate = 0.30 + 0.70 * smoothstep(0.22, 0.58, fbm1(x * 0.85 + t * 2.4));
+      n *= 1 - e + e * gate;
+    }
+    return n * this.p.spike * (0.30 + this.level * 1.25);
+  }
+
+  // Cheap fake-3D: yaw about the vertical axis, a fixed-ish pitch, one
+  // perspective divide. X arrives in halfW units, Y/Z in halfH units.
+  // Returns [px, py, depth 0..1].
+  _project(cx, cy, X, Y, Z){
+    const hw = this.halfW, hh = this.halfH;
+    const xp = X * hw, yp = Y * hh, zp = Z * hh;
+    const cw = Math.cos(this._yaw), sw = Math.sin(this._yaw);
+    const x1 =  xp * cw + zp * sw;
+    const z1 = -xp * sw + zp * cw;
+    const cp = Math.cos(this._pitch), sp = Math.sin(this._pitch);
+    const y1 = yp * cp - z1 * sp;
+    const z2 = yp * sp + z1 * cp;
+    const f  = 3.1 * hw;
+    const s  = f / (f - z2);
+    return [cx + x1 * s, cy - y1 * s, clamp(0.5 + z2 / (1.25 * hw), 0, 1)];
+  }
+
+  // A lattice vertex at normalised grid position (xn, yn), both -1 .. 1.
+  _pt(cx, cy, xn, yn){
+    const tp = taperAt(xn);
+    const gn = this._grid(xn, yn);
+    const Y  = this._trace(xn) * LATTICE_RIDE + yn * tp * (1 + gn);
+    const Z  = Math.cos(yn * Math.PI / 2) * tp * (1 + gn) * this.depthAmp;
+    return this._project(cx, cy, xn, Y, Z);
+  }
+
+  /* ---------------- drawing ---------------- */
+  _drawStatic(){
+    // reduced motion: one legible, mid-energy frame, no loop. t is picked, not
+    // arbitrary: at 5.35 the trace has peaks on both sides of centre and
+    // neither tapered tip is swallowed by a spike.
+    this.t = 5.35; this.rot = 0.55;
+    this.p = this._targets(this.state);
+    this.level = this.state === 'paused' ? 0.06 : 0.45;
+    this._draw();
+  }
+
+  _draw(){
+    if (!this.w) return;
+    const g = this.bctx, w = this.w, h = this.h;
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'butt';
+    g.lineJoin = 'round';
+
+    const cx = w / 2, cy = h / 2;
+    const pad = 2 * this.k + 1;
+    const dj  = clamp(this.p.faceA, 0, 1);
+    const pulse = 1 + this.level * 0.06;
+    this.halfW = (w / 2 - pad);
+    // the sheet is WIDE: full width, but only ~55% of the height. It also
+    // flattens a little while the DJ icon is up so the icon has clear ground.
+    this.halfH = (h / 2 - pad) * (0.62 - 0.13 * dj) * pulse;
+    this.depthAmp = 0.85;
+    this._yaw   = Math.sin(this.rot * 1.7) * (0.16 + this.p.spin * 0.42);
+    this._pitch = 0.26 + Math.sin(this.t * 0.31) * 0.05;
+
+    const lw = Math.max(0.55, 0.80 * this.k) * this.o.lineScale;
+
+    this._drawLattice(g, cx, cy, lw);
+    this._drawWave(g, cx, cy, lw);
+    // v2: the DJ icon is ONLY ever drawn in the 'dj-talking' state.
+    if (this.o.face && this.state === 'dj-talking' && dj > 0.02){
+      this._knockout(g, cx, cy, dj);
+      this._drawFace(g, cx, cy, lw, dj);
+    }
+
+    // ---- composite with bloom ----
+    const c = this.ctx, dpr = this.dpr;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    c.globalCompositeOperation = 'lighter';
+    const B = this.o.bloom * this.p.glow;
+    if (c.filter !== undefined){
+      c.filter = `blur(${(2.0 * this.k * dpr).toFixed(2)}px)`;
+      c.globalAlpha = 0.70 * B;
+      c.drawImage(this.buf, 0, 0);
+      c.filter = `blur(${(5.5 * this.k * dpr).toFixed(2)}px)`;
+      c.globalAlpha = 0.55 * B;
+      c.drawImage(this.buf, 0, 0);
+      c.filter = 'none';
+    }
+    c.globalAlpha = 0.95;
+    c.drawImage(this.buf, 0, 0);
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+  }
+
+  // rows = horizontal lattice lines running the full width (these carry the
+  // pinch); cols = vertical ribs whose height is the taper envelope.
+  _drawLattice(g, cx, cy, lw){
+    const { rows, cols, segments } = this.o;
+    const dimK = this.p.dim;
+    const nx = Math.max(12, segments * 2);
+    const ny = Math.max(6, rows * 2);
+
+    for (let i = 0; i < rows; i++){
+      const yn = -1 + 2 * (i / (rows - 1));
+      // the row sitting exactly on the centreline is dimmed — the bright
+      // trace is drawn there and two hot lines on top of each other muddies it
+      const w8 = Math.abs(yn) < 1e-3 ? 0.35 : 1;
+      const pts = [];
+      for (let s = 0; s <= nx; s++) pts.push(this._pt(cx, cy, -1 + 2 * s / nx, yn));
+      this._strokePoly(g, pts, lw, dimK * w8);
+    }
+    for (let j = 0; j < cols; j++){
+      const xn = -1 + 2 * (j / (cols - 1));
+      // the two end ribs collapse to a point under the taper — skip them
+      if (taperAt(xn) < 0.02) continue;
+      const pts = [];
+      for (let s = 0; s <= ny; s++) pts.push(this._pt(cx, cy, xn, -1 + 2 * s / ny));
+      this._strokePoly(g, pts, lw * 0.85, dimK * 0.78);
+    }
+  }
+
+  // Stroke a polyline, alpha varying with depth so it reads as 3D.
+  // Butt caps + a half-segment overlap: round caps under 'lighter' compositing
+  // double up at every joint and turn a solid line into a string of beads.
+  _strokePoly(g, pts, lw, dimK){
+    g.lineCap = 'butt';
+    for (let i = 1; i < pts.length; i++){
+      const a0 = pts[i - 1], b0 = pts[i];
+      const d = (a0[2] + b0[2]) / 2;
+      const a = (0.075 + d * d * 0.78) * dimK;
+      if (a <= 0.012) continue;
+      const ex = (b0[0] - a0[0]) * 0.02, ey = (b0[1] - a0[1]) * 0.02;
+      g.strokeStyle = this._css(0.18 + d * 0.52, a);
+      g.lineWidth = lw * (0.70 + d * 0.55);
+      g.beginPath();
+      g.moveTo(a0[0] - ex, a0[1] - ey);
+      g.lineTo(b0[0] + ex, b0[1] + ey);
+      g.stroke();
+    }
+  }
+
+  // The bright oscilloscope trace through the horizontal middle: a wide dim
+  // ribbon pass under a narrow hot core pass, both riding the same _trace()
+  // the lattice rows ride, plus short stems dropped to the axis at the peaks.
+  _drawWave(g, cx, cy, lw){
+    g.lineCap = 'butt';
+    const N = 64;
+    const pts = [], axis = [];
+    for (let i = 0; i <= N; i++){
+      const xn = -1 + 2 * (i / N);
+      const tp = taperAt(xn);
+      const Z  = tp * this.depthAmp;               // yn = 0 → cos(0) = 1
+      pts.push(this._project(cx, cy, xn, this._trace(xn), Z));
+      axis.push(this._project(cx, cy, xn, 0, Z));
+    }
+    const dimK = this.p.dim;
+
+    // faint baseline so the trace always has an axis to deviate from
+    this._strokePoly(g, axis, lw * 0.55, dimK * 0.30);
+
+    // stems: every 4th sample, a tick from the axis up to the trace
+    g.lineWidth = lw * 0.75;
+    for (let i = 2; i < N - 1; i += 4){
+      const a = axis[i], b = pts[i];
+      const mag = Math.min(1, Math.abs(b[1] - a[1]) / (this.halfH * 0.55));
+      if (mag < 0.06) continue;
+      g.strokeStyle = this._css(0.35, (0.10 + mag * 0.42) * dimK);
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    }
+
+    // two passes over the trace itself: soft wide glow, then the hot core
+    for (const pass of [0, 1]){
+      for (let i = 1; i <= N; i++){
+        const a = pts[i - 1], b = pts[i];
+        const tp  = taperAt(-1 + 2 * (i / N));
+        const mag = Math.min(1, Math.abs(cy - b[1]) / (this.halfH * 0.75));
+        const al  = pass === 0
+          ? (0.16 + mag * 0.26) * dimK * tp
+          : (0.55 + mag * 0.45) * dimK * (0.35 + 0.65 * tp);
+        if (al <= 0.015) continue;
+        g.strokeStyle = this._css(pass === 0 ? 0.30 : 0.55 + mag * 0.42, al);
+        g.lineWidth = pass === 0 ? lw * (2.6 + mag * 1.6) : lw * (0.95 + mag * 0.7);
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      }
+    }
+  }
+
+  // half-height of the DJ icon — v2 derives it from the canvas, not from the
+  // (now much flatter) lattice extents, so the head keeps a readable size.
+  _faceHH(){ return Math.min(this.w, this.h) / 2 * 0.44 * this.o.faceScale; }
+
+  // Soft hole punched in the lattice/wave so the DJ icon sits on clear ground —
+  // this is what makes the trace read as passing BEHIND the head.
+  _knockout(g, cx, cy, k){
+    const r = this._faceHH() * 1.75;
+    const grd = g.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grd.addColorStop(0,    `rgba(0,0,0,${(0.94 * k).toFixed(3)})`);
+    grd.addColorStop(0.45, `rgba(0,0,0,${(0.74 * k).toFixed(3)})`);
+    grd.addColorStop(1,    'rgba(0,0,0,0)');
+    g.globalCompositeOperation = 'destination-out';
+    g.fillStyle = grd;
+    g.beginPath();
+    g.ellipse(cx, cy, r, r, 0, 0, Math.PI * 2);
+    g.fill();
+    g.globalCompositeOperation = 'lighter';
+  }
+
+  /* DJ Atomika ID icon — bald head, wraparound shades, short beard. Line art,
+     same glowing stroke language as the lattice. Detail is dropped at small
+     sizes rather than scaled down into mush.
+     v2: takes a fade weight `k` and is only ever called in 'dj-talking'. */
+  _drawFace(g, cx, cy, lw, k){
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    const hh = this._faceHH();                                      // half height
+    const hw = hh * 0.74;                                           // half width
+    const y = cy + hh * 0.02;
+    const W = Math.max(0.7, lw * 1.25);
+    const detail = hh > 13;                       // ~>60px glyph: add the extras
+    const set = (a, mul) => { g.strokeStyle = this._css(0.82, a * k); g.lineWidth = W * (mul || 1); };
+
+    // --- bald skull + jaw, one closed silhouette ---
+    set(0.95);
+    g.beginPath();
+    g.moveTo(cx, y - hh);
+    g.bezierCurveTo(cx + hw * 1.06, y - hh * 0.98, cx + hw * 1.02, y + hh * 0.10, cx + hw * 0.88, y + hh * 0.40);
+    g.bezierCurveTo(cx + hw * 0.74, y + hh * 0.82, cx + hw * 0.36, y + hh, cx, y + hh);
+    g.bezierCurveTo(cx - hw * 0.36, y + hh, cx - hw * 0.74, y + hh * 0.82, cx - hw * 0.88, y + hh * 0.40);
+    g.bezierCurveTo(cx - hw * 1.02, y + hh * 0.10, cx - hw * 1.06, y - hh * 0.98, cx, y - hh);
+    g.stroke();
+
+    // --- short beard: a second jawline inside the silhouette + moustache ---
+    set(0.55, 0.85);
+    g.beginPath();
+    g.moveTo(cx - hw * 0.92, y + hh * 0.30);
+    g.bezierCurveTo(cx - hw * 0.72, y + hh * 0.74, cx - hw * 0.34, y + hh * 0.86, cx, y + hh * 0.86);
+    g.bezierCurveTo(cx + hw * 0.34, y + hh * 0.86, cx + hw * 0.72, y + hh * 0.74, cx + hw * 0.92, y + hh * 0.30);
+    g.stroke();
+    if (detail){
+      g.beginPath();                                    // moustache
+      g.moveTo(cx - hw * 0.34, y + hh * 0.46);
+      g.quadraticCurveTo(cx, y + hh * 0.58, cx + hw * 0.34, y + hh * 0.46);
+      g.stroke();
+      g.beginPath();                                    // mouth
+      g.moveTo(cx - hw * 0.20, y + hh * 0.62);
+      g.quadraticCurveTo(cx, y + hh * 0.68, cx + hw * 0.20, y + hh * 0.62);
+      g.stroke();
+    }
+
+    // --- wraparound shades: two tilted lozenges + a bridge ---
+    const lensW = hw * 0.86, lensH = hh * 0.36, lensY = y - hh * 0.14;
+    for (const sgn of [-1, 1]){
+      g.save();
+      g.translate(cx + sgn * hw * 0.52, lensY);
+      g.rotate(-sgn * 0.13);                            // outer edge rides higher
+      set(1.0, 1.2);
+      roundRectPath(g, -lensW / 2, -lensH / 2, lensW, lensH, lensH * 0.42);
+      g.stroke();
+      if (detail){                                       // lens glint
+        set(0.45, 0.8);
+        g.beginPath();
+        g.moveTo(-lensW * 0.26, lensH * 0.22);
+        g.lineTo(-lensW * 0.02, -lensH * 0.24);
+        g.stroke();
+      }
+      g.restore();
+    }
+    set(1.0, 1.2);
+    g.beginPath();                                       // nose bridge
+    g.moveTo(cx - hw * 0.11, lensY - lensH * 0.12);
+    g.lineTo(cx + hw * 0.11, lensY - lensH * 0.12);
+    g.stroke();
+    // --- ears: the cheapest cue that turns an egg into a head ---
+    set(0.62, 0.9);
+    for (const sgn of [-1, 1]){
+      g.beginPath();
+      g.moveTo(cx + sgn * hw * 0.97, lensY + lensH * 0.10);
+      g.bezierCurveTo(
+        cx + sgn * hw * 1.26, lensY - lensH * 0.10,
+        cx + sgn * hw * 1.26, lensY + lensH * 1.35,
+        cx + sgn * hw * 0.92, lensY + lensH * 1.25);
+      g.stroke();
+    }
+    g.lineCap = 'butt';
+  }
+}
+
+/* ---------------- helpers ---------------- */
+const CY_DIM = [11, 143, 174];    // --cyan-600
+const CY_HOT = [190, 250, 255];   // hotter than --cyan-300 for the core
+const AM_DIM = [184, 123, 18];    // --amber-600
+const AM_HOT = [255, 214, 138];   // deliberately not near-white: amber blooms hot
+const TAPER_EXP = 1.5;            // the "pinch" exponent
+const LATTICE_RIDE = 0.34;        // how much of the waveform trace the lattice
+                                  // rows ride (1 = full ride; that turns the
+                                  // sheet to soup)
+function mix3(a, b, t){ return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]; }
+function clamp(v, a, b){ return v < a ? a : v > b ? b : v; }
+function smoothstep(e0, e1, x){ const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); }
+function hash1(n){ const s = Math.sin(n * 127.1) * 43758.5453123; return s - Math.floor(s); }
+function noise1(x){ const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return hash1(i) * (1 - u) + hash1(i + 1) * u; }
+function fbm1(x){ return noise1(x) * 0.55 + noise1(x * 2.13 + 7.7) * 0.30 + noise1(x * 4.71 + 3.1) * 0.15; }
+/* the pinch. 1 at the middle, 0 at both horizontal ends. */
+function taperAt(xn){ return Math.pow(Math.cos(clamp(xn, -1, 1) * Math.PI / 2), TAPER_EXP); }
+function roundRectPath(g, x, y, w, h, r){
+  r = Math.min(r, w / 2, h / 2);
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);       g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r);   g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + r, y + h);       g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r);           g.quadraticCurveTo(x, y, x + r, y);
+  g.closePath();
+}
+
+(() => {
+  const pill = document.getElementById('pill');
+  const trackTitle = document.getElementById('trackTitle');
+  const sourceTag = document.getElementById('sourceTag');
+  const progressFill = document.getElementById('progressFill');
+  const timeLabel = document.getElementById('timeLabel');
+  const iconPlay = document.getElementById('iconPlay');
+  const iconPause = document.getElementById('iconPause');
+
+  const pulseGlyph = new PulseFieldGlyph(
+    document.querySelector('.rb-glyph .pf-canvas'),
+    { latRings:5, lonLines:10, segments:26 }
+  );
+
+  const QUEUE = [
+    {title:'Elysium Alps', artist:'Reveille', source:'SSX3', dur:214},
+    {title:'White Powder', artist:'Fluke', source:'TRICKY', dur:198},
+    {title:'Run Amok', artist:'Fatboy Slim', source:'2012', dur:231},
+    {title:'Untitled Mix (yours)', artist:'added from radio/custom/', source:'CUSTOM', dur:176},
+  ];
+
+  const state = {
+    index: 0,
+    playing: true,
+    djTalking: false,
+    elapsed: 34,
+    open: false,
+    reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  };
+
+  let collapseTimer = null;
+  let tickTimer = null;
+
+  function fmt(s){
+    s = Math.max(0, Math.round(s));
+    const m = Math.floor(s/60), sec = s%60;
+    return m + ':' + String(sec).padStart(2,'0');
+  }
+
+  function render({sting=false} = {}){
+    const t = QUEUE[state.index];
+    trackTitle.textContent = t.title;
+    sourceTag.textContent = state.djTalking ? 'DJ' : t.source;
+    sourceTag.className = 'rb-tag' + (t.source === 'CUSTOM' ? ' custom' : '');
+    timeLabel.textContent = fmt(t.dur - state.elapsed) === '0:00' ? fmt(t.dur) : fmt(state.elapsed) ;
+    const pct = Math.min(100, (state.elapsed / t.dur) * 100);
+    progressFill.style.width = pct + '%';
+
+    pill.classList.toggle('is-playing', state.playing && !state.djTalking);
+    pill.classList.toggle('is-paused', !state.playing);
+    pill.classList.toggle('is-dj-talking', state.djTalking);
+    pulseGlyph.setState(state.djTalking ? 'dj-talking' : state.playing ? 'playing' : 'paused');
+
+    iconPlay.style.display = state.playing ? 'none' : '';
+    iconPause.style.display = state.playing ? '' : 'none';
+
+    if (sting){
+      trackTitle.classList.remove('is-changing');
+      void trackTitle.offsetWidth;
+      trackTitle.classList.add('is-changing');
+    }
+  }
+
+  /* Collapsed-state cue: a single outward ring flash on the pill's own border.
+     No extra element, no text, and deliberately does NOT auto-expand — glance
+     at it if you care, ignore it if you don't. When the pill is already open
+     the .rb-title slide is the whole notification, so we skip this. */
+  function cue(){
+    if (state.open) return;
+    pill.classList.remove('is-cue');
+    void pill.offsetWidth;
+    pill.classList.add('is-cue');
+    clearTimeout(cue._t);
+    cue._t = setTimeout(() => pill.classList.remove('is-cue'), 700);
+  }
+
+  function changeTrack(delta){
+    state.index = (state.index + delta + QUEUE.length) % QUEUE.length;
+    state.elapsed = 0;
+    state.djTalking = false;
+    render({sting:true});
+    cue();
+  }
+
+  /* ---------------- open / close ----------------
+     Rule: nothing INSIDE the pill ever closes it. A click anywhere in the pill
+     (transport, dead space) only re-arms the idle timer; the panel closes
+     on a real outside click, on Escape, or on the idle timeout. The director's
+     console is excluded from "outside" because several of its buttons open the
+     pill on purpose — their own click would otherwise slam it shut again. */
+  function setOpen(open){
+    state.open = open;
+    pill.classList.toggle('is-open', open);
+    clearTimeout(collapseTimer);
+    if (open && !pill.matches(':hover')) armCollapse();
+  }
+
+  // 0 pins the panel open — handy when dialling the look in from devtools
+  // (RadioBig.setIdleCollapse(0)) so it doesn't time out mid-screenshot.
+  let idleCollapseMs = 5000;
+  function armCollapse(){
+    clearTimeout(collapseTimer);
+    if (!idleCollapseMs) return;
+    collapseTimer = setTimeout(() => setOpen(false), idleCollapseMs);
+  }
+
+  // any interaction inside the open pill resets the idle countdown
+  function keepOpen(){
+    if (!state.open) return;
+    clearTimeout(collapseTimer);
+    if (!pill.matches(':hover')) armCollapse();
+  }
+
+  pill.addEventListener('click', () => {
+    if (!state.open) setOpen(true);
+    else keepOpen();
+  });
+  pill.addEventListener('pointerdown', keepOpen);
+  pill.addEventListener('keydown', (e) => {
+    if (e.target !== pill) return;            // controls handle their own keys
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setOpen(true); }
+  });
+  pill.addEventListener('mouseenter', () => { if (state.open) clearTimeout(collapseTimer); });
+  pill.addEventListener('mouseleave', () => { if (state.open) armCollapse(); });
+
+  document.addEventListener('click', (e) => {
+    if (!state.open) return;
+    if (pill.contains(e.target)) return;                       // anything in the pill: never closes
+    if (e.target.closest && e.target.closest('.console')) return;  // prototype driver, not the game world
+    setOpen(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.open) setOpen(false);
+  });
+
+  document.getElementById('btnPlay').addEventListener('click', () => { state.playing = !state.playing; render(); });
+  document.getElementById('btnNext').addEventListener('click', () => changeTrack(1));
+  document.getElementById('btnPrev').addEventListener('click', () => changeTrack(-1));
+
+  // console
+  const cPlayPause = document.getElementById('cPlayPause');
+  const cPlayPauseLabel = document.getElementById('cPlayPauseLabel');
+  cPlayPause.addEventListener('click', () => { state.playing = !state.playing; cPlayPauseLabel.textContent = state.playing ? 'Pause' : 'Play'; render(); });
+  document.getElementById('cNext').addEventListener('click', () => changeTrack(1));
+  document.getElementById('cPrev').addEventListener('click', () => changeTrack(-1));
+
+  const cDj = document.getElementById('cDj');
+  document.getElementById('cDj').addEventListener('click', () => {
+    state.djTalking = !state.djTalking;
+    cDj.classList.toggle('active', state.djTalking);
+    if (state.djTalking) setOpen(true);
+    render();
+  });
+
+  document.getElementById('cCustom').addEventListener('click', () => {
+    state.index = QUEUE.findIndex(t => t.source === 'CUSTOM');
+    state.elapsed = 0;
+    state.djTalking = false;
+    setOpen(true);
+    render({sting:true});
+  });
+
+  const cMotion = document.getElementById('cMotion');
+  const motionState = document.getElementById('motionState');
+  cMotion.addEventListener('click', () => {
+    state.reducedMotion = !state.reducedMotion;
+    motionState.textContent = state.reducedMotion ? 'on' : 'off';
+    document.documentElement.style.setProperty('--force-reduced', state.reducedMotion ? '1' : '0');
+    pill.style.transition = state.reducedMotion ? 'opacity .2s ease' : '';
+    pulseGlyph.setReducedMotion(state.reducedMotion);
+    cMotion.classList.toggle('active', state.reducedMotion);
+  });
+
+  tickTimer = setInterval(() => {
+    if (!state.playing || state.djTalking) return;
+    const t = QUEUE[state.index];
+    state.elapsed += 1;
+    if (state.elapsed >= t.dur){ changeTrack(1); return; }
+    timeLabel.textContent = fmt(state.elapsed);
+    progressFill.style.width = Math.min(100, (state.elapsed / t.dur) * 100) + '%';
+  }, 1000);
+
+  /* devtools hooks — same state machine the console buttons drive, so a concept
+     pass can be dialled in from the browser console:
+       RadioBig.setOpen(true); RadioBig.state          */
+  window.RadioBig = {
+    state,
+    setOpen,
+    changeTrack,
+    cue,
+    setIdleCollapse(ms){ idleCollapseMs = Math.max(0, Number(ms) || 0); if (state.open) keepOpen(); return idleCollapseMs; },
+    setPlaying(on){ state.playing = !!on; render(); },
+    setDjTalking(on){ state.djTalking = !!on; render(); },
+  };
+
+  render();
+  setTimeout(cue, 600);   // "the radio came on" — same silent ring cue, no pop-up
+})();
+</script>

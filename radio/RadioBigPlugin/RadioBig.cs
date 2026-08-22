@@ -52,9 +52,15 @@ namespace RadioBigTM
         internal static ConfigEntry<bool> enableSsx2012;
 
         internal static string CurrentLevelName;
+        // Authoritative "a race is actually in progress" flag. Set by the three
+        // Harmony patches below, which learn it first-hand from the game rather
+        // than inferring it from the status file's round-tripped `state` string.
+        // The HUD gates its whole visibility on this -- see RadioBigHud.Update.
+        internal static bool IsRacing;
         internal static RadioClient Client;
         internal static Process PlayerProc;   // the bundled player, if we launched it
         internal static string CmdFile;       // command spool the player tails (file transport)
+        internal static string StatusFile;    // "now playing" JSON the player writes, HUD polls
 
         // The game's music events (posted on MenuManager.musicPlayer). Muting
         // exactly these hands the music slot to Radio Big while leaving every SFX
@@ -117,6 +123,10 @@ namespace RadioBigTM
             // launch so the player never replays a previous session's STARTs.
             string dllDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             CmdFile = Path.Combine(dllDir, "RadioBig", "radio.cmd");
+            // Same directory as CmdFile, so the one CreateDirectory below covers
+            // both. The player writes this one (atomic temp+rename); we only
+            // ever read it, so nothing to reset here the way CmdFile is truncated.
+            StatusFile = Path.Combine(dllDir, "RadioBig", "radio.status.json");
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(CmdFile));
@@ -130,6 +140,12 @@ namespace RadioBigTM
             Client = new RadioClient(CmdFile, Log, () => verbose.Value);
             Client.Start();
             Client.Send("HELLO");
+
+            // "Now playing" HUD: polls StatusFile and draws the pill widget.
+            // Lives on this same persistent GameObject so it survives scene
+            // loads exactly like the client above.
+            gameObject.AddComponent<RadioStatusReader>();
+            gameObject.AddComponent<RadioBigHud>();
 
             new Harmony("com.mtv.radiobig").PatchAll(typeof(Patches));
             // Transport tag in the load line so a log unambiguously identifies which
@@ -211,7 +227,8 @@ namespace RadioBigTM
                 // and the player + game share a PID namespace (spawned child) on both
                 // native macOS and wine, so the watch resolves on either target.
                 int gamePid = Process.GetCurrentProcess().Id;
-                string args = $"--managed --gamepid {gamePid} --cmdfile \"{Plugin.CmdFile}\"";
+                string args = $"--managed --gamepid {gamePid} --cmdfile \"{Plugin.CmdFile}\"" +
+                              $" --statusfile \"{Plugin.StatusFile}\"";
                 if (haveAssets) args += $" --assets \"{assets}\"";
                 // Passed by argv, not env: env vars do not reliably reach a
                 // wine-spawned child (same reason --assets is an arg). Always
@@ -331,6 +348,7 @@ namespace RadioBigTM
         {
             if (Plugin.masterEnable == null || !Plugin.masterEnable.Value) return;
             string name = Plugin.CurrentLevelName ?? "";
+            Plugin.IsRacing = true;
             Plugin.Client.Send("START " + name);
             Plugin.Verbose($"[Radio] START {name}");
         }
@@ -344,6 +362,7 @@ namespace RadioBigTM
         private static void LevelManagerFinish_Postfix()
         {
             if (Plugin.masterEnable == null || !Plugin.masterEnable.Value) return;
+            Plugin.IsRacing = false;
             Plugin.Client.Send("FINISH");
             Plugin.Verbose("[Radio] FINISH");
         }
@@ -363,6 +382,7 @@ namespace RadioBigTM
             if (in_pszEventName == Plugin.MenuEvent)
             {
                 // Booting into / returning to the lobby -> menu broadcast.
+                Plugin.IsRacing = false;
                 Plugin.Client.Send("MENU");
                 Plugin.Verbose("[Radio] MENU");
             }
