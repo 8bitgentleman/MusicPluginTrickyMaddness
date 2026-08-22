@@ -92,8 +92,9 @@ the wrinkle that the **Windows `.exe` is frozen from macOS under CrossOver's Win
 
 ## The soundtrack pools
 
-Five asset dirs under `assets/`: `dj` (Atomika's voice clips) and four
-soundtracks — `ssx3`, `tricky`, `sxot` (SSX On Tour), `ssx2012` (SSX 2012).
+Six asset dirs under `assets/`: `dj` (Atomika's voice clips) and five
+soundtracks — `ssx3`, `tricky`, `sxot` (SSX On Tour), `ssx2012` (SSX 2012),
+`tm` (Tricky Madness' own).
 
 | Pool | Tracks | Artist-matched intros? |
 |---|---|---|
@@ -101,10 +102,12 @@ soundtracks — `ssx3`, `tricky`, `sxot` (SSX On Tour), `ssx2012` (SSX 2012).
 | `tricky` | 21 + a menu loop + 2 alternate recordings | no — instrumental, and they predate this DJ |
 | `sxot` | 41 | no — On Tour dropped Atomika's station for a plain shuffle. One exception: **Queens Of The Stone Age are on both soundtracks**, so On Tour's *Medication* resolves to the real intro naming them |
 | `ssx2012` | 36 | no — 2012 has its own in-game DJ, not Atomika, so these ride the generic intros. Filenames carry real artists because the ripper reads them off the disc's own MBSI table (`tricky_mods: ssx/ssx2012_musicbox.py`) |
+| `tm` | 14 race + 3 lobby loops | no — original music by Jordan Schor, on no SSX soundtrack, so it rides the generic intros as `ssx2012` does. **Not shipped in the pack**; built locally by `radio/extract_tm_music.py` — see § The `tm` pool |
 
-⚠️ **`sxot` and `ssx2012` are optional and must stay that way.** Each only
-exists if you own that disc and ran the ripper (`tricky_mods:
-ssx/audio_rip_music.py`). A missing pool reads as `not installed` in the startup
+⚠️ **`sxot`, `ssx2012` and `tm` are optional and must stay that way.** The first two only
+exist if you own that disc and ran the ripper (`tricky_mods:
+ssx/audio_rip_music.py`); `tm` only exists once the player has run
+`extract_tm_music.py` against their own install. A missing pool reads as `not installed` in the startup
 diagnostic rather than `MISSING DIR`, `package.sh` skips it with a warning
 instead of failing its prereq check, and `DJBrain._next_song` **renormalises
 `SOURCE_WEIGHTS` over the pools that actually loaded** — so a two-soundtrack
@@ -145,12 +148,19 @@ artist out of `<NN> - <Title> (<Artist>).mp3`; the artist is the **last**
 parenthetical. Nothing reads ID3 tags. Rename a pool and you silently lose its
 artist matching.
 
-## Planned: the `tm` pool — Tricky Madness' own soundtrack
+## The `tm` pool — Tricky Madness' own soundtrack
 
-Radio Big currently *replaces* the game's music wholesale (the `PostEvent` prefix
-mutes all 8 music events). This adds it back as a **fifth soundtrack pool**, on
-equal footing with the four rips. Facts below verified 2026-08-20 against the
+Radio Big *replaces* the game's music wholesale (the `PostEvent` prefix mutes all
+8 music events). This pool adds it back as a **fifth soundtrack**, on equal
+footing with the four rips: same filename contract, same `[Sources]` toggle, same
+weight renormalisation. Built 2026-08-22; facts below verified against the
 shipped Mac + Windows installs unless flagged otherwise.
+
+⚠️ **The music is never played back through Wwise.** Un-muting the game's own
+events for `tm` tracks was considered and rejected: two processes means no
+ducking, Atomika can't talk over a track he isn't mixing, and Wwise gives the
+Python side no end-of-track callback. The pool goes through the same decode →
+MP3 → pygame path as every other pool.
 
 **The game hands us the metadata.** TM ships its Wwise
 `GeneratedSoundBanks/` with `SoundbanksInfo.xml` and per-bank `.txt` intact, so
@@ -159,6 +169,10 @@ alone gives the full event → media-ID → title mapping. Decoding is
 `vgmstream-cli` + `ffmpeg`, already this project's sibling toolchain
 (`tricky_mods: ssx/AUDIO_EXTRACTION.md`); proven end-to-end on
 `255779309.wem` → 2:54 / 44.1 kHz / stereo MP3.
+
+⚠️ **`vgmstream-cli` is required even for `--dry-run`** — durations and the
+subsong join both come from probing, so there is no metadata-only mode. Only the
+encode step needs `ffmpeg`, which is why the two tools are guarded separately.
 
 ⚠️ **Mac and Windows ship identical media** — same 14 `.wem` IDs, same Custom
 Vorbis encoding, same `.txt`. One extractor covers both; only the base path
@@ -215,14 +229,38 @@ three has "menu" in its name. Have the extractor number the loops **90–92** an
 split on `num >= 90`, mirroring SSX 3's track-number range test. Songs are 01–14
 off their own event names, so the 90s are free.
 
-### Extraction happens on the user's machine
+### Extraction is a release-time step, not a player-facing one
 
-Unlike the four rips, this pool is **not staged into the release bundle**. It is
-built locally from the user's own install. That is not just the licensing-safe
-choice (it is the *developer's* soundtrack, a different question from the EA disc
-rips) — it also adds 0 MB to the pack and cannot be missing.
+The pool **ships in the pack** like every other soundtrack. `extract_tm_music.py`
+is run by whoever cuts the release, against their own install; players install
+the mod and the music is simply there.
 
-Sketch (new script, modelled on `tricky_mods: ssx/audio_rip_music.py`):
+⚠️ **Do not re-propose shipping the extractor instead of the audio.** It was
+built that way first and the numbers kill it: the pool is **63 MB**, while
+bundling the decoders it shells out to is **~108 MB for macOS alone** (ffmpeg
+57.7 MB and vgmstream 49.8 MB, both counting the libraries they link — the bare
+`ffmpeg` binary is a misleading 417 KB), with a separate set again for Windows.
+That is triple the download to avoid the download, plus a command-line `.exe` in
+a Windows mod folder for antivirus to flag. The alternative — telling a
+non-technical audience to install Python, ffmpeg and vgmstream — is not one.
+Against a pack that is **already 1.2 GB**, the 63 MB it "saves" is ~5%.
+
+`radio/extract_tm_music.py`, run before packaging:
+
+```
+python3 extract_tm_music.py                  # auto-locate install and output
+python3 extract_tm_music.py --dry-run        # resolve + list, decode nothing
+python3 extract_tm_music.py --install <dir> --out <dir> --force
+```
+
+It needs `vgmstream-cli` and `ffmpeg` on PATH (`brew install vgmstream ffmpeg`).
+Output defaults to **`<game>/BepInEx/plugins/RadioBig/assets/tm`** when RadioBig
+is installed, which is exactly where `dj_library` looks — so the common case is
+zero-config, no env var and no path to set. With no RadioBig present it falls
+back to `~/Downloads/SSX_Audio/tricky_madness/music` and prints the
+`RADIO_BIG_TM` export needed to use it from there.
+
+What it does, and why none of it is a hardcoded table:
 
 1. Locate the install; pick the `Mac/` or `Windows/` bank dir.
 2. Parse `Music_Bank.txt` for ID → title. **Don't hardcode the table** — a game
@@ -238,25 +276,37 @@ Sketch (new script, modelled on `tricky_mods: ssx/audio_rip_music.py`):
    one composer, so the artist is a constant, not something to parse out of
    the bank.
 
+⚠️ **Track identity comes from the Wwise *object path*, not the `Name` field.**
+The segment after `JordanMusic\` is `01 White Powder`; the media `Name` is a
+working title (`[-24LUFS] Back to Life - Cmin 135BPM`). Parse the wrong one and
+every filename — and therefore every title the DJ announces — is studio shorthand.
+
+⚠️ **Stingers share a song's folder** (a 1 s and a 4 s KSHMR impact under
+`09 Bringin' Tha Noize`), and nothing in the metadata marks them as non-music.
+Length is the only discriminator — `MIN_TRACK_SECONDS = 30`, against a real
+minimum of 1:44.
+
 ⚠️ **`vgmstream-cli` renders the loop by default** — every one of these tracks
 has loop points, so without `-i` each comes out played twice with a fade
 (White Powder decodes 5:58 instead of 2:54). Nothing errors; the whole pool is
 just silently double-length.
 
-### The wiring checklist
+### Where it is wired
 
-Same shape as § The soundtrack pools' warning — none of these fail loudly:
+Same shape as § The soundtrack pools' warning — none of these fail loudly, so
+this is also the map for whoever adds a sixth soundtrack:
 
 | File | Edit |
 |---|---|
 | `dj_library.py` | resolved path + env override in `_resolve_assets()` (~L64) and the module-level unpack (~L96); a row in `_log_asset_diag` (~L99); `"tm"` in `ALL_SOURCES` (~L263); a `_list_music()` loop tagged `source="tm"` that routes `num >= 90` to `menu_tracks` (~L300) |
 | `dj_brain.py` | a `SOURCE_WEIGHTS` entry (~L100) **and rebalance the other four** — they currently sum to exactly 1.00, so a fifth added without adjusting them rides `UNWEIGHTED_SHARE` (0.10) and says so on stdout |
-| `RadioBigPlugin/RadioBig.cs` | a `[Sources]` toggle beside the existing four (~L102–108) |
-| `package.sh` | **no `stage_optional` call** (not bundled) — but the summary line should still report the pool so a broken local extract is visible |
+| `RadioBigPlugin/RadioBig.cs` | `[Sources]` → `TrickyMadness`, default on; `srcs.Add("tm")` in the launch-arg builder. Default-on is safe because a missing `assets/tm` just loads nothing |
+| `package.sh` | a `stage_optional` call like the two disc rips, and a `tm=` count in the summary. It is *mechanically* optional (absent until the extractor runs) but, unlike `sxot`/`ssx2012`, does not depend on owning another disc — so `tm=0` in a release is a mistake, not a valid slimmer pack |
+| `extract_tm_music.py` | `MENU_BASE = 90` — one half of a two-file contract with `dj_library.TM_MENU_BASE`. Drift between them doesn't fail; it quietly drops lobby loops into the race shuffle |
 
-### Open
+### Notes
 
-- **Artist: Jordan Schor** — he composed the whole TM soundtrack, so all 14
+- **Artist: Jordan Schor** — he composed the whole TM soundtrack, so all 17
   tracks carry the same credit. (Settled by the user, 2026-08-20; nothing in
   `Assembly-CSharp.dll` or `resources.assets` carries a composer string, and the
   only in-game trace is the `JordanMusic` Wwise object path.) `parse_song()`
@@ -276,6 +326,7 @@ Same shape as § The soundtrack pools' warning — none of these fail loudly:
 | `radio/radio_server.py` | IPC server + the DJ engine entry point. |
 | `radio/dj_brain.py`, `dj_library.py`, `radio_player.py` | Scheduler / clip selection / pygame mixing. |
 | `radio/RadioBigPlugin/RadioBig.cs` | The BepInEx bridge (mutes music, spawns player, forwards events). |
+| `radio/extract_tm_music.py` | Builds the `tm` pool from an install. Release-time tool — run it before `package.sh`. |
 | `radio/freeze.sh`, `freeze_windows.sh`, `package.sh` | Freeze (mac / windows-via-Wine) and assemble the bundle. |
 
 ## Status
@@ -284,5 +335,13 @@ Same shape as § The soundtrack pools' warning — none of these fail loudly:
 - DJ brain, artist matching, IPC: **built + tested** (silent-stub dry runs).
 - Plugin: **runs in-game** — spawns the player, mutes music, forwards `START` /
   `FINISH` / `MENU`. The Doorstop-inject and Windows-freeze problems are fixed.
+- `tm` pool: **built** (2026-08-22) — extractor, library wiring, weights and the
+  `[Sources]` toggle. Verified on Mac: 17/17 tracks decode at source length, the
+  library loads 14 race + 3 lobby, source filtering and weight renormalisation
+  behave. Verified on **Windows** by running the extractor under the bottle's
+  Windows Python (`drive_c/py312/python.exe`, `sys.platform == 'win32'`) against
+  the bottle's own install — same 17 song folders as Mac, native separators
+  throughout, output resolving to `assets\tm`. Decode itself is unproven there:
+  the bottle has no Windows `vgmstream-cli`/`ffmpeg`. **Not yet heard in game.**
 - Reactive `EVENT` lines: player + protocol ready; the game-side combo/knockdown
   hooks are **not wired yet** (needs Assembly-CSharp RE).

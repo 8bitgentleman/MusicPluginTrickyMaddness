@@ -37,19 +37,22 @@ MUSIC_EXTS = (".mp3", ".ogg", ".wav", ".m4a")
 
 
 # --- asset locations ------------------------------------------------------
-# Five audio pools: the Radio Big DJ voice clips, and the four soundtracks.
+# Six audio pools: the Radio Big DJ voice clips, and the five soundtracks.
 # Resolved at import so the same code runs from source (the author's machine)
 # AND as a frozen, shipped bundle. Precedence:
-#   1. RADIO_BIG_ASSETS  -> <dir>/{dj,ssx3,tricky,sxot,ssx2012}   (the shipped
-#      layout; the plugin sets this when it auto-launches the frozen player)
-#   2. per-pool overrides RADIO_BIG_{DJ,SSX3,TRICKY,SXOT,SSX2012}
+#   1. RADIO_BIG_ASSETS  -> <dir>/{dj,ssx3,tricky,sxot,ssx2012,tm}  (the
+#      shipped layout; the plugin sets this when it auto-launches the frozen
+#      player)
+#   2. per-pool overrides RADIO_BIG_{DJ,SSX3,TRICKY,SXOT,SSX2012,TM}
 #   3. an `assets/` folder beside a PyInstaller-frozen executable
 #   4. the original dev paths (running from source, unfrozen)
 #
 # ⚠️ A missing pool is NOT an error — On Tour and SSX 2012 both ship as optional
-# extras (each needs a disc the player may not own), and an install without them
-# must degrade to what is there rather than break. The bags in dj_brain
-# renormalise over whichever sources actually loaded.
+# extras (each needs a disc the player may not own), and Tricky Madness' own
+# soundtrack is extracted locally rather than shipped, so it is absent until the
+# user runs extract_tm_music.py. An install without any of them must degrade to
+# what is there rather than break. The bags in dj_brain renormalise over
+# whichever sources actually loaded.
 _DEV_DJ = "/Users/mtvogel/Downloads/claude_scratch/Radio_Big/Radio_Big_Sections"
 _DEV_SSX3 = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX 3 [Soundtrack⧸Gamerip]"
 _DEV_TRICKY = "/Users/mtvogel/Documents/PythonScripts/youtube-dl/SSX Tricky (Complete Soundtrack OST)"
@@ -59,6 +62,11 @@ _DEV_SXOT = os.path.expanduser("~/Downloads/SSX_Audio/ssx_on_tour/music")
 # SSX (2012) comes off the user's own PS3 dump via the same ripper, which names
 # the files from the disc's MBSI table (tricky_mods: ssx/ssx2012_musicbox.py).
 _DEV_SSX2012 = os.path.expanduser("~/Downloads/SSX_Audio/ssx2012/music")
+# Tricky Madness' own soundtrack is NOT shipped in the bundle — it is the game
+# developer's music and every user of this mod already owns the game, so it is
+# extracted from their install by radio/extract_tm_music.py, whose default
+# output dir this mirrors.
+_DEV_TM = os.path.expanduser("~/Downloads/SSX_Audio/tricky_madness/music")
 
 
 def _resolve_assets():
@@ -90,10 +98,12 @@ def _resolve_assets():
         os.path.join(base, "sxot") if base else _DEV_SXOT)
     ssx2012 = os.environ.get("RADIO_BIG_SSX2012") or (
         os.path.join(base, "ssx2012") if base else _DEV_SSX2012)
-    return dj, ssx3, tricky, sxot, ssx2012
+    tm = os.environ.get("RADIO_BIG_TM") or (
+        os.path.join(base, "tm") if base else _DEV_TM)
+    return dj, ssx3, tricky, sxot, ssx2012, tm
 
 
-RADIO, SSX3, TRICKY, SXOT, SSX2012 = _resolve_assets()
+RADIO, SSX3, TRICKY, SXOT, SSX2012, TM = _resolve_assets()
 
 
 def _log_asset_diag():
@@ -109,7 +119,7 @@ def _log_asset_diag():
     # a broken assets path.
     for label, d, optional in (("dj", RADIO, False), ("ssx3", SSX3, False),
                                ("tricky", TRICKY, False), ("sxot", SXOT, True),
-                               ("ssx2012", SSX2012, True)):
+                               ("ssx2012", SSX2012, True), ("tm", TM, True)):
         n = len(glob.glob(os.path.join(d, "*.mp3"))) if os.path.isdir(d) else -1
         state = f"{n} mp3" if n >= 0 else ("not installed" if optional
                                            else "MISSING DIR")
@@ -260,7 +270,12 @@ def _list_music(d):
     )
 
 
-ALL_SOURCES = ("ssx3", "tricky", "sxot", "ssx2012")
+ALL_SOURCES = ("ssx3", "tricky", "sxot", "ssx2012", "tm")
+
+# Where the `tm` pool's lobby loops start. Must match extract_tm_music.py's
+# MENU_BASE — they are two halves of one contract, and a drift here silently
+# puts menu loops into the race shuffle rather than failing.
+TM_MENU_BASE = 90
 
 
 class Library:
@@ -324,6 +339,23 @@ class Library:
             num, title, artist = parse_song(p)
             self.songs.append(dict(path=p, num=num, title=title,
                                    artist_id=artist, source="ssx2012"))
+        # Tricky Madness' own soundtrack (extract_tm_music.py): 14 race songs
+        # numbered 01-14 off their Wwise event names, plus 3 lobby loops the
+        # extractor numbers from 90 so they can be split off by range.
+        # ⚠️ Range test, NOT the `"menu" in title` heuristic used for Tricky:
+        # only "Main Menu Music" would match that, so Log Cabin and Sunset
+        # Slopes would leak into the race shuffle.
+        # No artist matching: this is original music by Jordan Schor, on no SSX
+        # soundtrack, so Atomika has no clip naming him and it rides the generic
+        # intros exactly as SSX 2012 does.
+        for p in _list_music(TM):
+            num, title, _ = parse_song(p)
+            if num is not None and num >= TM_MENU_BASE:
+                self.menu_tracks.append(dict(path=p, num=num, title=title,
+                                             artist_id=None, source="tm"))
+                continue
+            self.songs.append(dict(path=p, num=num, title=title,
+                                   artist_id=None, source="tm"))
 
         if self.sources is not None:
             dropped = sorted({s["source"] for s in self.songs} - self.sources)
@@ -349,8 +381,9 @@ class Library:
                 # loops there are; with both off the menu is silent even though
                 # races still have music, which looks like a different bug.
                 print("!! [library] no menu/lobby music left (that comes from "
-                      "SSX 3's Hub Themes and Tricky's Menu track) — menus will "
-                      "be silent, races still play.", flush=True)
+                      "SSX 3's Hub Themes, Tricky's Menu track and Tricky "
+                      "Madness' own lobby loops) — menus will be silent, races "
+                      "still play.", flush=True)
 
     def intros_for(self, song):
         """The artist-matched intro clips for a song, or [] if none."""
@@ -368,7 +401,7 @@ if __name__ == "__main__":
     # Counted off ALL_SOURCES rather than a hand-listed set, so a soundtrack
     # added to the library can never quietly go unreported here.
     _labels = {"ssx3": "SSX3", "tricky": "Tricky", "sxot": "On Tour",
-               "ssx2012": "SSX 2012"}
+               "ssx2012": "SSX 2012", "tm": "Tricky Madness"}
     print(f"\nSongs: {len(lib.songs)} (" + " + ".join(
         f"{sum(1 for s in lib.songs if s['source'] == src)} "
         f"{_labels.get(src, src)}" for src in ALL_SOURCES) + ")")

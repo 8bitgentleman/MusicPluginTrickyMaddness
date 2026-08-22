@@ -95,10 +95,13 @@ class DJBrain:
     # ⚠️ Feel numbers, not measured. Each new soundtrack is carved out of SSX3's
     # share rather than the others', so nothing that was already playing gets
     # quieter when one is added: 0.78/0.22 before On Tour, 0.66/0.19/0.15 after,
-    # and SSX 2012 takes its 0.15 from SSX3 the same way. SSX3 keeps the lead at
-    # roughly half the rotation, which is the point of the ordering.
-    SOURCE_WEIGHTS = {"ssx3": 0.51, "tricky": 0.19, "sxot": 0.15,
-                      "ssx2012": 0.15}
+    # SSX 2012 takes its 0.15 from SSX3 the same way, and Tricky Madness' own
+    # soundtrack takes 0.10 from it again. SSX3 keeps the lead — still more than
+    # double the next — which is the point of the ordering.
+    # `tm` sits lowest deliberately: it is the music Radio Big replaces, so it
+    # belongs in the rotation as a nod rather than as a headliner.
+    SOURCE_WEIGHTS = {"ssx3": 0.41, "tricky": 0.19, "sxot": 0.15,
+                      "ssx2012": 0.15, "tm": 0.10}
     # What an installed-but-unweighted soundtrack plays at until someone gives
     # it a real share — enough to be obviously present, not enough to take over.
     UNWEIGHTED_SHARE = 0.10

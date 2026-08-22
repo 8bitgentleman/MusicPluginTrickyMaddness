@@ -36,6 +36,17 @@ TRICKY_SRC="$ASSETS_SRC/tricky"
 # and working — the DJ just draws from fewer soundtracks.
 SXOT_SRC="$ASSETS_SRC/sxot"
 SSX2012_SRC="$ASSETS_SRC/ssx2012"
+# `tm` is Tricky Madness' own soundtrack, built by extract_tm_music.py from the
+# packer's install. It is optional for the same *mechanical* reason as the two
+# above — it is absent until someone runs the extractor — but unlike them it does
+# not depend on owning another disc, so a release missing it is a mistake rather
+# than a valid slimmer pack. Watch the summary line.
+#
+# It is shipped rather than extracted on the player's machine: bundling the
+# decoders it needs (ffmpeg + vgmstream, with their libraries) measured ~108 MB
+# for macOS alone against 63 MB for the finished audio, and would have put a
+# command-line .exe in a Windows mod folder for every antivirus to find.
+TM_SRC="$ASSETS_SRC/tm"
 
 # Required prerequisites (the DLL + the audio); players are per-OS and optional.
 for p in "$DLL" "$DJ_SRC" "$SSX3_SRC" "$TRICKY_SRC"; do
@@ -69,7 +80,7 @@ stage_player "$WIN_SRC" "windows"   "windows"
 
 # --- source tree (so Linux / any platform can run or re-freeze) --------------
 cp "$HERE/radio_server.py" "$HERE/dj_brain.py" "$HERE/dj_library.py" \
-   "$HERE/radio_player.py" "$HERE/run_radio.sh" \
+   "$HERE/radio_player.py" "$HERE/run_radio.sh" "$HERE/extract_tm_music.py" \
    "$HERE/freeze.sh" "$HERE/freeze_windows.sh" "$HERE/package.sh" \
    "$OUT/source/"
 # Every file build.sh compiles or embeds, or the shipped source can't rebuild
@@ -104,6 +115,7 @@ stage_optional() {  # <src dir> <pool name> <label>; echoes the mp3 count
 }
 SXOT_N="$(stage_optional "$SXOT_SRC" sxot "On Tour")"
 SSX2012_N="$(stage_optional "$SSX2012_SRC" ssx2012 "SSX 2012")"
+TM_N="$(stage_optional "$TM_SRC" tm "Tricky Madness")"
 
 echo "done."
 printf 'players: %s   dj=%s ssx3=%s tricky=%s sxot=%s ssx2012=%s clips\n' \
@@ -112,4 +124,5 @@ printf 'players: %s   dj=%s ssx3=%s tricky=%s sxot=%s ssx2012=%s clips\n' \
   "$(ls "$OUT/RadioBig/assets/ssx3"/*.mp3   | wc -l | tr -d ' ')" \
   "$(ls "$OUT/RadioBig/assets/tricky"/*.mp3 | wc -l | tr -d ' ')" \
   "$SXOT_N" "$SSX2012_N"
+printf 'tm=%s clips  (17 expected — run extract_tm_music.py if this is 0)\n' "$TM_N"
 du -sh "$OUT"

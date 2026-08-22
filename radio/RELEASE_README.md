@@ -7,6 +7,13 @@ Turns the game's music slot into **Radio Big**, the SSX3 station: Atomika
 introduces each track by name, the lobby runs mountain news / rider gossip
 between races, and it's paced and shuffled so no two sessions sound alike.
 
+**New in 1.5.0:** **Tricky Madness' own soundtrack** joins the station — all
+**17 tracks by Jordan Schor**, including **7 that ship in the game but are never
+played**, plus its 3 lobby loops, which join the menu music rather than the race
+shuffle. Radio Big replaces the game's music, so this puts it back in the
+rotation alongside the SSX albums instead of losing it. Switch it off under
+*Choosing which soundtracks play* if you'd rather hear only the SSX music.
+
 **New in 1.4.0:** an in-game **"now playing" pill** in the bottom-left corner
 during races. Closed, it's a small pulsing badge — amber with Atomika's face
 while he's talking, blue once the music is on. Wiggle the mouse and click it to
@@ -43,8 +50,8 @@ runs it from the included source (one `pip install`).
 RadioBigTM.dll            the BepInEx plugin (same file on every OS)
 RadioBig/
   assets/                 the audio: DJ voice + the SSX3 / Tricky / On Tour /
-                          SSX 2012 soundtracks (sxot/ and ssx2012/ only if the
-                          packer owned those discs)
+                          SSX 2012 / Tricky Madness soundtracks (sxot/ and
+                          ssx2012/ only if the packer owned those discs)
   players/
     windows/              frozen player for Windows        (RadioBigPlayer.exe)
     mac-arm64/            frozen player for Apple-Silicon  (RadioBigPlayer)
@@ -133,7 +140,7 @@ bottom-left and only appears during races.
 
 ## Choosing which soundtracks play
 
-Radio Big draws on four soundtracks, and you can switch any of them off — if you
+Radio Big draws on five soundtracks, and you can switch any of them off — if you
 never want to hear On Tour, or you only want the Tricky album, say so here. In
 `BepInEx/config/com.mtv.radiobig.cfg`, under the `[Sources]` section:
 
@@ -159,9 +166,15 @@ OnTour = true
 # Setting type: Boolean
 # Default value: true
 SSX2012 = true
+
+## Play Tricky Madness' own soundtrack.
+# Setting type: Boolean
+# Default value: true
+TrickyMadness = true
 ```
 
 Set one to `false` and restart the game. Things worth knowing before you do:
+
 
 - **The radio doesn't get quieter in proportion.** The remaining soundtracks
   simply take up the freed airtime, so switching three off gives you the fourth
@@ -186,8 +199,8 @@ than silently filtering everything out.
 
 ## What it plays
 
-The **SSX 3**, **SSX Tricky**, **SSX On Tour** and **SSX (2012)** soundtracks,
-with Atomika's real DJ segments. When a track has a dedicated intro, the DJ
+The **SSX 3**, **SSX Tricky**, **SSX On Tour** and **SSX (2012)** soundtracks
+plus **Tricky Madness' own**, with Atomika's real DJ segments. When a track has a dedicated intro, the DJ
 actually names the artist about to play. The lobby only recaps races *after*
 you've raced one — a cold boot never references a race that hasn't happened.
 
