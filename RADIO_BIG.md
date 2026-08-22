@@ -145,6 +145,127 @@ artist out of `<NN> - <Title> (<Artist>).mp3`; the artist is the **last**
 parenthetical. Nothing reads ID3 tags. Rename a pool and you silently lose its
 artist matching.
 
+## Planned: the `tm` pool — Tricky Madness' own soundtrack
+
+Radio Big currently *replaces* the game's music wholesale (the `PostEvent` prefix
+mutes all 8 music events). This adds it back as a **fifth soundtrack pool**, on
+equal footing with the four rips. Facts below verified 2026-08-20 against the
+shipped Mac + Windows installs unless flagged otherwise.
+
+**The game hands us the metadata.** TM ships its Wwise
+`GeneratedSoundBanks/` with `SoundbanksInfo.xml` and per-bank `.txt` intact, so
+every track is named and ID'd — there is **no bank RE to do**. `Music_Bank.txt`
+alone gives the full event → media-ID → title mapping. Decoding is
+`vgmstream-cli` + `ffmpeg`, already this project's sibling toolchain
+(`tricky_mods: ssx/AUDIO_EXTRACTION.md`); proven end-to-end on
+`255779309.wem` → 2:54 / 44.1 kHz / stereo MP3.
+
+⚠️ **Mac and Windows ship identical media** — same 14 `.wem` IDs, same Custom
+Vorbis encoding, same `.txt`. One extractor covers both; only the base path
+differs:
+
+| OS | Banks under |
+|---|---|
+| macOS | `TrickyMadness.app/Contents/Resources/Data/StreamingAssets/Audio/GeneratedSoundBanks/Mac/` |
+| Windows | `Tricky Madness_Data/StreamingAssets/Audio/GeneratedSoundBanks/Windows/` |
+
+### What's actually in there: 14 songs, of which the game plays 7
+
+`Music_Bank.txt` lists **15 music events** (`Play_00_Menu` … `Play_14_Back_To_Life`).
+`MenuManager.RegisterSongs()` registers **7**. The other seven are fully authored,
+sit in the bank, and **the game never plays them** — so this pool roughly doubles
+TM's playable soundtrack rather than merely restoring it.
+
+| Track | Media | Registered in-game? |
+|---|---|---|
+| 01 White Powder | `Media/255779309.wem` | yes |
+| 02 Inertia | `Media/413322008.wem` | **no** |
+| 03 APEX | `Media/1067108288.wem` | yes |
+| 04 LSD | `Media/866279913.wem` | yes |
+| 05 Shellshock | `Media/145550048.wem` | yes |
+| 06 Hypnotized | `Media/23143563.wem` | **no** |
+| 07 Play It Right | `Media/713564020.wem` | **no** |
+| 08 Backside Rodeo | `Music_Bank.bnk` subsong 9 | **no** |
+| 09 Bringin' Tha Noize | `Music_Bank.bnk` subsong 7 | **no** |
+| 10 Like Woah | `Music_Bank.bnk` subsong 6 | **no** |
+| 11 Psychic Damage | `Music_Bank.bnk` subsong 3 | yes |
+| 12 Burn It Down | `Music_Bank.bnk` subsong 4 | **no** |
+| 13 Amnesia | `Music_Bank.bnk` subsong 8 | yes |
+| 14 Back To Life | `Music_Bank.bnk` subsong 2 | yes |
+
+Plus **three lobby loops** — `Main Menu Music` (`661609931`), `Log Cabin`
+(`249736487`), `Sunset Slopes` (`396527700`). `Music_Bank.bnk` subsongs 1 and 5
+are KSHMR impact stingers, and the four remaining loose `.wem`s are ambience /
+a fan loop — none of those are music, don't rip them.
+
+### The menu loops feed `menu_tracks`, not the race shuffle
+
+The split mechanism already exists and needs no new wiring: SSX 3's Hub Themes
+and Tricky's Menu track already peel off into `Library.menu_tracks`
+(`dj_library.py` ~L295), which `DJBrain._menu_bag` / `_menu_broadcast` draw for
+the `MENU` broadcast. TM's three loops append there the same way.
+
+This also fixes a live edge case: menu music currently comes **only** from SSX 3
++ Tricky, so switching both off leaves the lobby silent (the warning at
+`dj_library.py` ~L351). TM's loops give the menu a floor — this is the one pool
+that is always installed, because everyone running this mod owns the game.
+
+⚠️ **Don't split them with the `"menu" in title` heuristic** — only one of the
+three has "menu" in its name. Have the extractor number the loops **90–92** and
+split on `num >= 90`, mirroring SSX 3's track-number range test. Songs are 01–14
+off their own event names, so the 90s are free.
+
+### Extraction happens on the user's machine
+
+Unlike the four rips, this pool is **not staged into the release bundle**. It is
+built locally from the user's own install. That is not just the licensing-safe
+choice (it is the *developer's* soundtrack, a different question from the EA disc
+rips) — it also adds 0 MB to the pack and cannot be missing.
+
+Sketch (new script, modelled on `tricky_mods: ssx/audio_rip_music.py`):
+
+1. Locate the install; pick the `Mac/` or `Windows/` bank dir.
+2. Parse `Music_Bank.txt` for ID → title. **Don't hardcode the table** — a game
+   update that adds a track should be picked up, not silently dropped.
+3. Streamed: `vgmstream-cli -i Media/<id>.wem`. In-bank:
+   `vgmstream-cli -i -s <n> Music_Bank.bnk` — and `<n>` is a **subsong index,
+   not an ID**, so resolve it by enumerating subsongs and joining on the
+   `stream name` vgmstream reports (which is the media ID). Same join as
+   `tricky_mods: ssx/AUDIO_EXTRACTION.md`. Today that lands Back To Life at 2,
+   Psychic Damage 3, Burn It Down 4, Like Woah 6, Bringin' Tha Noize 7,
+   Amnesia 8, Backside Rodeo 9 — derive it, don't bake it.
+4. Pipe to `ffmpeg` → `<NN> - <Title> (Jordan Schor).mp3`. The whole pool is
+   one composer, so the artist is a constant, not something to parse out of
+   the bank.
+
+⚠️ **`vgmstream-cli` renders the loop by default** — every one of these tracks
+has loop points, so without `-i` each comes out played twice with a fade
+(White Powder decodes 5:58 instead of 2:54). Nothing errors; the whole pool is
+just silently double-length.
+
+### The wiring checklist
+
+Same shape as § The soundtrack pools' warning — none of these fail loudly:
+
+| File | Edit |
+|---|---|
+| `dj_library.py` | resolved path + env override in `_resolve_assets()` (~L64) and the module-level unpack (~L96); a row in `_log_asset_diag` (~L99); `"tm"` in `ALL_SOURCES` (~L263); a `_list_music()` loop tagged `source="tm"` that routes `num >= 90` to `menu_tracks` (~L300) |
+| `dj_brain.py` | a `SOURCE_WEIGHTS` entry (~L100) **and rebalance the other four** — they currently sum to exactly 1.00, so a fifth added without adjusting them rides `UNWEIGHTED_SHARE` (0.10) and says so on stdout |
+| `RadioBigPlugin/RadioBig.cs` | a `[Sources]` toggle beside the existing four (~L102–108) |
+| `package.sh` | **no `stage_optional` call** (not bundled) — but the summary line should still report the pool so a broken local extract is visible |
+
+### Open
+
+- **Artist: Jordan Schor** — he composed the whole TM soundtrack, so all 14
+  tracks carry the same credit. (Settled by the user, 2026-08-20; nothing in
+  `Assembly-CSharp.dll` or `resources.assets` carries a composer string, and the
+  only in-game trace is the `JordanMusic` Wwise object path.) `parse_song()`
+  takes the artist from the last parenthetical, so name the files right the
+  first time — a rename later silently breaks artist matching.
+- **No Atomika intros exist for these tracks** (original music, on no SSX
+  soundtrack), so the pool rides the generic intros exactly as `ssx2012` does.
+  That is the established precedent, not a new gap.
+
 ## Where the pieces are
 
 | Path | What |
