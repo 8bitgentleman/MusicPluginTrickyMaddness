@@ -417,3 +417,8 @@ radio/dist-windows/
 # macOS Finder metadata. radio/.DS_Store was tracked until 1.3.0 — it was never
 # meant to be, and it churns the diff every time the folder is opened.
 .DS_Store
+
+# Radio Big banner cover art (fetch commands are in radio/make_banner.py). Publisher
+# box art — same licensing stance as the audio pools: used to render the release
+# banner, never committed.
+radio/banner_covers/

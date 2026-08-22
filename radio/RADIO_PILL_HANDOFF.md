@@ -918,3 +918,51 @@ unchanged from the first pass and still unexercised.
   removing it and dividing the CanvasScaler reference resolution by `PillScale` instead
   (same on-screen size). Cause is reasoned, not measured; confirm on next run.
   Deployed md5 `d49818e0bc35f9f37f136f63c882db95`.
+
+## Keyboard media keys — spiked and dropped (2026-08-22)
+
+Killed by the user as not worth the shipping cost, **not** for lack of a working
+mechanism. The mechanism was found and demonstrated; what follows is the part
+worth not rediscovering, because it took three rounds to isolate.
+
+The earlier verdict framed the risk as "the fullscreen Unity game will steal the
+keys first." That was never the blocker and **was never actually tested** — all
+three failures happened with nothing but the desktop focused. The real blockers,
+in the order they bit:
+
+- **A bare PyInstaller `--onedir` executable is never routed to at all.**
+  `mediaremoted` ignores a process with no app bundle. Registration on
+  `MPRemoteCommandCenter` succeeds and logs nothing wrong; the keys simply never
+  arrive. Rebuilding the same script with `--windowed --osx-bundle-identifier`
+  (plus `LSUIElement=1` patched into `Info.plist`) is what started the routing —
+  so shipping this would mean the Mac player becomes a `.app`, and the C#
+  `ProcessStartInfo` in `RadioBig.cs` has to launch `Contents/MacOS/<exe>`.
+- **Every `MPRemoteCommand` defaults to `enabled = True`** — verified by reading
+  `isEnabled()` off all 13 on a fresh centre. Leaving `seekForward`/`seekBackward`
+  advertised makes macOS send `BeginFastForward`/`BeginRewind` on the next/prev
+  keys instead of `NextTrack`/`PreviousTrack`, and `mediaremoted` then logs
+  `Undeliverable command [never supported] BeginFastForward`. Disabling the 14
+  extras and advertising only togglePlayPause/play/pause/next/prev is what made
+  the correct commands arrive.
+- **Other running media apps silently win the keys.** A play/pause press went to
+  Plexamp (visible in the log as `Stopped -> Paused`) while our process held the
+  next/prev. This is inherent to macOS routing to a single now-playing app and is
+  not fixable from the mod — a player with Spotify open gets contended keys.
+
+**Verified:** with a `.app` bundle, a silent pygame stream, published
+`MPNowPlayingInfoCenter` state and the strict command set, all three keys reached
+a frozen accessory-policy player — `HIT togglePlayPause / nextTrack /
+previousTrack`, no undeliverable errors, cross-checked against `mediaremoted`'s
+own log. Marginal pyobjc cost in the frozen bundle was ~2 MB. Previous-track is
+free on the *capture* side; it is still unimplementable player-side, since there
+is no play history to rewind to.
+
+**Not verified, and the one thing the spike existed to answer:** whether the keys
+still arrive with the game fullscreen and focused. Untested — we stopped before
+that round. Also unbisected: whether the silent audio stream is load-bearing or
+whether `MPNowPlayingInfoCenter` alone holds the now-playing claim. That matters
+if this is ever revived, because the real player goes quiet in menus.
+
+Windows was never started. `RegisterHotKey` with `VK_MEDIA_*` on a dedicated
+`GetMessage` thread via `ctypes` remains the plan, needs no dependency and no
+repackaging, and none of the macOS findings above apply to it.
