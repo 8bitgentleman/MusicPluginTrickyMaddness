@@ -10,6 +10,7 @@ rm -rf build dist RadioBigPlayer.spec
 pyinstaller --onedir --noconfirm --clean --name RadioBigPlayer \
   --collect-submodules pygame \
   --hidden-import dj_brain --hidden-import dj_library --hidden-import radio_player \
+  --hidden-import mutagen --collect-submodules mutagen \
   radio_server.py
 
 echo "frozen -> $HERE/dist/RadioBigPlayer"

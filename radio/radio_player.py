@@ -40,14 +40,59 @@ class RadioPlayer:
         self._voice_ch.set_volume(self.voice_level)
         pygame.mixer.music.set_volume(self.music_full)
 
+        # Track timing for the status-file HUD feed (see radio_server.py's
+        # StatusWriter). Wall-clock, not pygame's get_pos() -- get_pos() behaves
+        # oddly around fades/ducking, plain time.time() math is simpler and robust.
+        self._current_path = None
+        self._play_started = None
+        # Pause bookkeeping. elapsed() is wall-clock since play_music(), so a
+        # pause would otherwise keep advancing the HUD's progress bar while
+        # nothing was audible. _paused_at marks when the clock stopped and
+        # _paused_total accumulates across repeated pauses within one track.
+        self._paused_at = None
+        self._paused_total = 0.0
+        self._duration_cache = {}  # path -> seconds or None, so a re-play of the
+                                    # same track doesn't re-parse tags every time
+
     # --- music bed -------------------------------------------------------
     def play_music(self, path, fade_ms=800):
         pygame.mixer.music.load(path)
         pygame.mixer.music.play(fade_ms=fade_ms)
         self._ramp_music(self._music_target, 0.05)
+        self._current_path = path
+        self._play_started = time.time()
+        self._paused_at = None
+        self._paused_total = 0.0
 
     def music_busy(self):
         return pygame.mixer.music.get_busy()
+
+    def elapsed(self):
+        """Seconds since the current track started playing, or None if nothing
+        has been loaded yet. Plain wall-clock since play_music() was called --
+        deliberately NOT pygame.mixer.music.get_pos(), which behaves oddly
+        around fades."""
+        if self._play_started is None:
+            return None
+        now = self._paused_at if self._paused_at is not None else time.time()
+        return now - self._play_started - self._paused_total
+
+    def duration(self):
+        """Best-effort track length in seconds via mutagen tags, or None if it
+        can't be determined. A missing/corrupt tag (or a non-mp3 file mutagen.mp3
+        can't parse) must never crash playback -- this is a display nicety for
+        the HUD only, so any failure just falls back to None."""
+        if self._current_path is None:
+            return None
+        if self._current_path in self._duration_cache:
+            return self._duration_cache[self._current_path]
+        try:
+            from mutagen.mp3 import MP3
+            dur = MP3(self._current_path).info.length
+        except Exception:
+            dur = None
+        self._duration_cache[self._current_path] = dur
+        return dur
 
     def _ramp_music(self, target, seconds):
         """Smoothly move the music volume to `target` over `seconds`."""
@@ -84,6 +129,47 @@ class RadioPlayer:
 
     def stop(self, fade_ms=600):
         pygame.mixer.music.fadeout(fade_ms)
+        self._paused_at = None
+        self._paused_total = 0.0
+
+    # --- transport (driven by the pill's buttons, via the plugin) --------
+    def is_paused(self):
+        return self._paused_at is not None
+
+    def pause(self):
+        """Suspend the music bed. Returns True if this call changed anything.
+
+        The DJ voice channel is deliberately NOT paused: a voice clip is a
+        second or two long and _say() ducks and un-ducks around it, so freezing
+        it mid-sentence would strand the bed at ducked volume."""
+        if self._paused_at is not None or self._play_started is None:
+            return False
+        pygame.mixer.music.pause()
+        self._paused_at = time.time()
+        return True
+
+    def resume(self):
+        """Resume the music bed. Returns True if this call changed anything."""
+        if self._paused_at is None:
+            return False
+        pygame.mixer.music.unpause()
+        self._paused_total += time.time() - self._paused_at
+        self._paused_at = None
+        return True
+
+    def skip_track(self):
+        """End the current track now.
+
+        A hard stop rather than a fadeout: the DJ loop treats "not busy" as
+        "song over" and moves straight to the next one, so a fade would leave
+        the outgoing track audible underneath the incoming intro. Un-pauses
+        first, because a paused stream ignores stop() on some SDL backends and
+        would strand the loop waiting forever."""
+        if self._paused_at is not None:
+            pygame.mixer.music.unpause()
+            self._paused_at = None
+        pygame.mixer.music.stop()
+        self._paused_total = 0.0
 
 
 # --- standalone dogfood demo --------------------------------------------

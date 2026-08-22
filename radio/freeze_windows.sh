@@ -43,9 +43,9 @@ if [ ! -f "$DRIVE/py312/python.exe" ]; then
   rm -rf "$tmp"
 fi
 
-echo "[freeze-win] ensuring pygame + pyinstaller..."
+echo "[freeze-win] ensuring pygame + pyinstaller + mutagen..."
 run 'C:\py312\python.exe' -m pip install --no-warn-script-location \
-  pygame pyinstaller >/dev/null
+  pygame pyinstaller mutagen >/dev/null
 
 # --- stage the source in the bottle and freeze -------------------------------
 rm -rf "$DRIVE/rbbuild"; mkdir -p "$DRIVE/rbbuild"
@@ -57,6 +57,7 @@ run 'C:\py312\python.exe' -m PyInstaller \
   --onedir --noconfirm --clean --name RadioBigPlayer \
   --collect-submodules pygame \
   --hidden-import dj_brain --hidden-import dj_library --hidden-import radio_player \
+  --hidden-import mutagen --collect-submodules mutagen \
   --distpath 'C:\rbbuild\dist' --workpath 'C:\rbbuild\build' --specpath 'C:\rbbuild' \
   'C:\rbbuild\radio_server.py'
 

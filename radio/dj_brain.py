@@ -29,6 +29,18 @@ from radio_player import RadioPlayer
 from dj_library import Library
 
 
+def _display_artist(artist_id):
+    """Human-readable artist name for the status feed. dj_library.py has no
+    canonical display-name table (artist_id is an internal matching key, e.g.
+    "queens_stone_age", "rhcp_executioners") -- checked, there's INTRO_ARTISTS
+    and SONG_ARTIST but both only map INTO artist_id, never back out to prose.
+    So this is a plain fallback: underscores to spaces, title-cased. Good
+    enough for a HUD ("Queens Stone Age"), not meant to be publication-quality."""
+    if not artist_id:
+        return None
+    return artist_id.replace("_", " ").title()
+
+
 class ShuffleBag:
     """Draw without replacement; reshuffle only once exhausted (no repeats until
     every item has been used). The anti-repetition that makes it feel curated."""
@@ -136,26 +148,111 @@ class DJBrain:
         self._thread = None
         self._raced_session = False  # unlocks recap banter after the first race
 
+        # --- status feed for the in-game HUD (radio_server.py's StatusWriter,
+        # optional --statusfile) --------------------------------------------
+        # `track` here is metadata only (title/artist/source); elapsed/duration
+        # are NOT cached -- get_status() reads them live off self.player so a
+        # poller always sees a current number, not one stamped at the last
+        # transition.
+        self._status_lock = threading.Lock()
+        self._status = {"state": "idle", "track": None, "dj_talking": False}
+        self._status_listener = None  # optional no-arg callable, see below
+
+    def set_status_listener(self, fn):
+        """Register a no-arg callable invoked every time the status snapshot
+        changes, so a poller (StatusWriter) can push an update immediately
+        instead of waiting out its tick. Best-effort: an exception from the
+        listener is swallowed here so a HUD-reporting hiccup can never take
+        down playback."""
+        self._status_listener = fn
+
+    def get_status(self):
+        """Current snapshot for the HUD feed: {state, track, dj_talking}.
+        See module docstring users (radio_server.py StatusWriter) for the JSON
+        shape this is serialised into. `track` is None when nothing is
+        currently playing; elapsed/duration are computed live from the player,
+        never from a value stamped at the last transition."""
+        with self._status_lock:
+            state = self._status["state"]
+            meta = self._status["track"]
+            dj_talking = self._status["dj_talking"]
+        track = None
+        if meta is not None:
+            elapsed = self.player.elapsed()
+            track = {
+                "title": meta.get("title"),
+                "artist": meta.get("artist"),
+                "source": meta.get("source"),
+                "elapsed": elapsed if elapsed is not None else 0.0,
+                "duration": self.player.duration(),
+            }
+        return {"state": state, "track": track, "dj_talking": dj_talking,
+                "paused": self.player.is_paused()}
+
+    def _set_status(self, **changes):
+        """Update one or more status fields (state/track/dj_talking) and
+        notify the listener, if any. `track` should be a small dict
+        (title/artist/source) or None -- never call this with elapsed/duration,
+        those are computed live in get_status()."""
+        with self._status_lock:
+            self._status.update(changes)
+        if self._status_listener is not None:
+            try:
+                self._status_listener()
+            except Exception:
+                pass  # a HUD notification must never break playback
+
     # --- public API (driven by the plugin over IPC) ----------------------
     def start_course(self, name=""):
         """A race started: intro -> song (no menu chatter)."""
         self._raced_session = True  # from now on the lobby may recap races
+        self._set_status(state="racing", track=None)
         self._begin(self._race_broadcast)
 
     def enter_menu(self):
         """Back at the lobby: menu loops with banter spliced in."""
+        self._set_status(state="menu", track=None)
         self._begin(self._menu_broadcast)
 
     def finish(self):
         """Race finished (FINISHED on screen): sign off NOW, then fade the bed —
         fires here so it never bleeds into the next race's start."""
         self._halt_worker()
+        self._set_status(state="finished", track=None)
         threading.Thread(target=self._do_outro, daemon=True).start()
 
     def stop_all(self, fade_ms=600):
         """Full stop — e.g. the game quit and the socket dropped."""
         self._halt_worker()
+        self._set_status(state="idle", track=None, dj_talking=False)
         self.player.stop(fade_ms=fade_ms)
+
+    # --- transport (the pill's buttons) ---------------------------------
+    def skip(self):
+        """Next track now. The broadcast worker is already blocked in
+        _wait_for_track_end, and that wait is driven entirely by "is the bed
+        still busy" -- so ending the bed IS the skip. Nothing here has to know
+        which worker is running or what it planned to play next."""
+        self._log("skip -> ending current track")
+        self.player.skip_track()
+
+    def set_paused(self, paused):
+        """Pause or resume the music bed. Returns the resulting paused state.
+
+        Note the worker keeps running: _wait_for_track_end also waits out a
+        pause (see there), so a paused track does not silently advance the
+        playlist while the rider is in the menu."""
+        changed = self.player.pause() if paused else self.player.resume()
+        if changed:
+            self._log("paused" if paused else "resumed")
+            # Push the new icon state to the HUD immediately rather than
+            # letting it wait out the status writer's next tick.
+            self._set_status()
+        return self.player.is_paused()
+
+    def toggle_pause(self):
+        """Flip pause state. Returns the resulting paused state."""
+        return self.set_paused(not self.player.is_paused())
 
     def react(self, kind):
         """Reactive one-liner for a gameplay beat (combo/knockdown/...).
@@ -214,6 +311,17 @@ class DJBrain:
             if stop.is_set():
                 break
             self.player.play_music(song["path"])
+            # Status update sits HERE (after play_music, not when the song was
+            # drawn above) so title/artist line up with elapsed/duration, which
+            # the player only starts counting from once play_music actually
+            # starts the track -- setting it before the intro line would show
+            # the new title against the previous track's elapsed/duration for
+            # the length of the intro clip.
+            self._set_status(state="racing", track={
+                "title": song["title"],
+                "artist": _display_artist(song.get("artist_id")),
+                "source": song["source"],
+            })
             self._log(f"NOW PLAYING: {song['title']} "
                       f"[{song['source']}]" + ("" if song["artist_id"] else " (no intro)"))
             self._wait_for_track_end(stop)  # let the song finish before the next intro
@@ -222,7 +330,11 @@ class DJBrain:
         with self._voice_lock:                 # don't collide with a race clip
             clip = self._draw("RadioBigOutros")
             if clip and self.player.music_busy():
-                self.player.say(clip, restore=False)  # stay ducked, then fade
+                self._set_status(dj_talking=True)
+                try:
+                    self.player.say(clip, restore=False)  # stay ducked, then fade
+                finally:
+                    self._set_status(dj_talking=False)
         self.player.stop(fade_ms=1400)
 
     # --- menu: lobby loops with banter spliced in ------------------------
@@ -233,6 +345,11 @@ class DJBrain:
             if track is None:
                 break
             self.player.play_music(track["path"], fade_ms=1200 if first else 800)
+            self._set_status(state="menu", track={
+                "title": track["title"],
+                "artist": _display_artist(track.get("artist_id")),
+                "source": track["source"],
+            })
             self._log(f"MENU: {track['title']} [{track['source']}]")
             first = False
             # Splice a banter line every menu_banter_gap seconds until the loop
@@ -251,7 +368,10 @@ class DJBrain:
         this worker and rolls the outro, so there's no reason to cut a track
         short mid-run (the old fixed segment cap chopped every song that ran
         longer than it, which was every real track)."""
-        while self.player.music_busy() and not stop.is_set():
+        # `or is_paused()` matters: pygame reports a paused stream as not
+        # busy on some backends, which would read as "song over" and skip to
+        # the next track the moment you hit pause.
+        while (self.player.music_busy() or self.player.is_paused()) and not stop.is_set():
             time.sleep(0.15)
 
     def _sleep_interruptible(self, seconds, stop):
@@ -335,14 +455,22 @@ class DJBrain:
             try:
                 if stop is not None and stop.is_set():
                     return
-                self.player.say(path)
+                self._set_status(dj_talking=True)
+                try:
+                    self.player.say(path)
+                finally:
+                    self._set_status(dj_talking=False)
             finally:
                 self._voice_lock.release()
         else:
             # Reactive: skip rather than queue if the DJ is already talking.
             if self._voice_lock.acquire(blocking=False):
                 try:
-                    self.player.say(path)
+                    self._set_status(dj_talking=True)
+                    try:
+                        self.player.say(path)
+                    finally:
+                        self._set_status(dj_talking=False)
                 finally:
                     self._voice_lock.release()
 

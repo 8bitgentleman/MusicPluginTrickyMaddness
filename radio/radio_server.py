@@ -21,6 +21,9 @@ One line = one command (newline-terminated, case-insensitive verb):
     FINISH                ->  race finished: outro NOW, then fade
     MENU                  ->  lobby broadcast (menu loops + banter)
     EVENT <combo|knockdown>  ->  ducked reactive DJ line
+    SKIP | NEXT           ->  end the current track, play the next
+    PAUSE / RESUME        ->  suspend / resume the music bed
+    TOGGLE                ->  flip pause state
     QUIT                  ->  stop the music and exit
 
 UDP, not TCP, on purpose: the plugin runs as Windows Mono under wine (CrossOver),
@@ -31,8 +34,15 @@ reply/timeout to depend on — the plugin just fires datagrams. We never reply;
 the plugin never reads. Deliberately forgiving: a bad line is logged, never
 fatal. Because UDP is connectionless there's no disconnect to detect a quit, so
 managed mode leans on a heartbeat (see MANAGED_GRACE_SECONDS).
+
+There's also a THIRD, separate, opposite-direction channel: --statusfile <path>
+(optional). Where --cmdfile is game -> Python, this is Python -> game: the
+StatusWriter below mirrors DJBrain's live state/track/dj_talking as JSON so the
+plugin can poll it for an in-game "now playing" HUD. One-way and read-only from
+the game's side — nothing the game writes to that file is ever read back here.
 """
 import argparse
+import json
 import os
 import socket
 import sys
@@ -68,7 +78,7 @@ from dj_library import Library
 # Keep in sync with the plugin's BepInPlugin version in RadioBigPlugin/RadioBig.cs.
 # Purely cosmetic now (UDP: we send no reply) — the plugin attr is the version a
 # bug reporter's log actually shows. Sync it anyway.
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 48757  # arbitrary high port; must match the plugin config
 
@@ -119,9 +129,84 @@ def _pid_alive(pid):
         return True  # exists, just not ours to signal
 
 
+class StatusWriter(threading.Thread):
+    """Background thread: mirrors DJBrain.get_status() to a JSON file the
+    C# plugin polls to drive an in-game "now playing" HUD widget. This is a
+    NEW, separate, one-way channel in the opposite direction of --cmdfile
+    (Python -> game instead of game -> Python) — reporting only, it never
+    reads anything back.
+
+    Entirely optional: only constructed/started when --statusfile is passed.
+    Writes atomically (tmp file + os.replace) so a poller reading mid-write
+    never sees a half-written/truncated JSON file. Writes on a ~220ms tick
+    AND immediately on every DJBrain status transition, via the nudge()
+    wired in as DJBrain's status listener (see RadioServer.__init__)."""
+    INTERVAL = 0.22
+
+    def __init__(self, dj, path):
+        super().__init__(daemon=True, name="RadioBig-StatusWriter")
+        self.dj = dj
+        self.path = path
+        self._stop = threading.Event()
+        self._wake = threading.Event()
+        # Guards the tmp-write + os.replace critical section. Without this, the
+        # background loop's own write and stop()'s synchronous final write (called
+        # from a different thread) can both open the SAME "<path>.tmp" at once;
+        # whichever renames second finds its tmp file already moved away by the
+        # other and os.replace raises FileNotFoundError. Caller ordering (always
+        # dj.stop_all() before status_writer.stop()) makes the two writes' CONTENT
+        # identical, so this lock only needs to stop them stepping on each other's
+        # tmp file, not decide which write "wins".
+        self._write_lock = threading.Lock()
+
+    def run(self):
+        while True:
+            self._write_status()
+            if self._stop.is_set():
+                return
+            self._wake.wait(self.INTERVAL)
+            self._wake.clear()
+
+    def nudge(self):
+        """Ask for an immediate write instead of waiting out the tick. Passed
+        to DJBrain.set_status_listener, so this fires on every state/track/
+        dj_talking change (song draws, DJ starting/stopping talking, race
+        start/finish, menu entry, stop_all) with no polling delay."""
+        self._wake.set()
+
+    def stop(self):
+        """Stop the writer and leave the status file showing nothing playing.
+        Runs SYNCHRONOUSLY on the calling thread (does not wait for the
+        background thread to wake up and do it) — this is called right before
+        the server process exits, so the idle snapshot must land on disk
+        before that happens rather than depend on the daemon thread getting
+        scheduled again first."""
+        self._stop.set()
+        self._wake.set()
+        self._write_json({"state": "idle", "track": None, "dj_talking": False})
+
+    def _write_status(self):
+        try:
+            status = self.dj.get_status()
+        except Exception as e:  # a reporting bug must never take down playback
+            print(f"[status] get_status failed: {e}", flush=True)
+            return
+        self._write_json(status)
+
+    def _write_json(self, status):
+        tmp = self.path + ".tmp"
+        with self._write_lock:
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(status, f)
+                os.replace(tmp, self.path)  # atomic on POSIX and Windows
+            except OSError as e:
+                print(f"[status] write failed: {e}", flush=True)
+
+
 class RadioServer:
     def __init__(self, host=DEFAULT_HOST, port=DEFAULT_PORT, seed=None,
-                 managed=False, game_pid=None, sources=None):
+                 managed=False, game_pid=None, sources=None, status_file=None):
         self.host, self.port = host, port
         self.dj = DJBrain(seed=seed, library=Library(sources=sources))
         self.game_pid = game_pid  # watch this; exit when it dies (managed)
@@ -132,6 +217,17 @@ class RadioServer:
         # keeps serving so the game can reconnect across restarts.
         self.managed = managed
         self._shutdown = threading.Event()
+
+        # Optional reporting side-channel for the in-game "now playing" HUD
+        # (--statusfile). Started here, not in serve_forever/serve_file, so the
+        # very first write (idle, track=None) lands as soon as the process is up
+        # — before the game has sent its first START/MENU — rather than only
+        # after the IPC loop begins.
+        self.status_writer = None
+        if status_file:
+            self.status_writer = StatusWriter(self.dj, status_file)
+            self.dj.set_status_listener(self.status_writer.nudge)
+            self.status_writer.start()
 
     def serve_forever(self):
         srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -185,6 +281,8 @@ class RadioServer:
             self.dj.stop_all(fade_ms=400)
         finally:
             srv.close()
+            if self.status_writer:
+                self.status_writer.stop()
 
     def serve_file(self, path):
         # File transport: tail a shared command file the plugin appends verbs to.
@@ -243,6 +341,8 @@ class RadioServer:
                 self.dj.stop_all(fade_ms=400)
                 break
             time.sleep(0.15)
+        if self.status_writer:
+            self.status_writer.stop()
 
     def _dispatch(self, line):
         # Returns False for QUIT (caller shuts down), True otherwise. No reply is
@@ -261,6 +361,14 @@ class RadioServer:
                 self.dj.enter_menu()
             elif verb == "EVENT":
                 self.dj.react(arg.lower())
+            elif verb == "SKIP" or verb == "NEXT":
+                self.dj.skip()
+            elif verb == "PAUSE":
+                self.dj.set_paused(True)
+            elif verb == "RESUME":
+                self.dj.set_paused(False)
+            elif verb == "TOGGLE":
+                self.dj.toggle_pause()
             elif verb == "QUIT":
                 return False
             else:
@@ -299,6 +407,14 @@ def main(argv=None):
                     help="tail this shared command file instead of binding a UDP "
                          "socket. This is the transport the plugin uses (the socket "
                          "path never delivered under wine); host/port are ignored.")
+    ap.add_argument("--statusfile", default=None,
+                    help="write live playback status (state/track/dj_talking) as "
+                         "JSON to this path, atomically, roughly every 200-250ms "
+                         "and on every state change. A separate, opposite-direction "
+                         "channel from --cmdfile: this one is Python -> game, for "
+                         "an in-game 'now playing' HUD to poll. Optional — omitted "
+                         "means no status file is written and behaviour is "
+                         "identical to today.")
     args = ap.parse_args(argv)
     sources = None
     if args.sources is not None:
@@ -306,7 +422,8 @@ def main(argv=None):
         # says so loudly) rather than reading it back as "unset".
         sources = [t.strip() for t in args.sources.split(",") if t.strip()]
     srv = RadioServer(args.host, args.port, args.seed, managed=args.managed,
-                      game_pid=args.gamepid, sources=sources)
+                      game_pid=args.gamepid, sources=sources,
+                      status_file=args.statusfile)
     if args.cmdfile:
         srv.serve_file(args.cmdfile)
     else:
